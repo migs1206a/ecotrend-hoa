@@ -24,6 +24,8 @@ const {
   validateResidentEmail
 } = require('../utils/emailVerification');
 
+const RESEND_EMAIL_API_URL = 'https://api.resend.com/emails';
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -94,6 +96,18 @@ const getEmailAuthConfig = () => ({
   pass: String(process.env.EMAIL_PASSWORD || '').trim()
 });
 
+const getResendConfig = () => ({
+  apiKey: String(process.env.RESEND_API_KEY || '').trim(),
+  from: String(
+    process.env.EMAIL_FROM ||
+      process.env.RESEND_FROM ||
+      process.env.EMAIL_USER ||
+      ''
+  ).trim()
+});
+
+const hasResendConfig = () => Boolean(getResendConfig().apiKey);
+
 const createTransporter = () =>
   nodemailer.createTransport({
     service: 'gmail',
@@ -102,9 +116,26 @@ const createTransporter = () =>
 
 const getEmailServiceErrorMessage = (error) => {
   const { user, pass } = getEmailAuthConfig();
+  const { apiKey, from } = getResendConfig();
 
-  if (!user || !pass) {
-    return 'Email service is not configured. Add EMAIL_USER and EMAIL_PASSWORD to backend/.env, then restart the backend server.';
+  if (error?.provider === 'resend') {
+    if (error.status === 401 || error.status === 403) {
+      return 'Email API login failed. Check RESEND_API_KEY in Render.';
+    }
+
+    if (error.status === 422 || /domain|from/i.test(error.message || '')) {
+      return 'Email sender is not verified. Verify your domain in Resend and set EMAIL_FROM, for example Ecotrend HOA <noreply@ecotrendhoa.com>.';
+    }
+
+    return 'Email API failed to send the message. Check Render logs and your Resend dashboard.';
+  }
+
+  if (apiKey && !from) {
+    return 'Email sender is not configured. Add EMAIL_FROM in Render, for example Ecotrend HOA <noreply@ecotrendhoa.com>.';
+  }
+
+  if (!apiKey && (!user || !pass)) {
+    return 'Email service is not configured. On Render Free, add RESEND_API_KEY and EMAIL_FROM. For local Gmail SMTP, add EMAIL_USER and EMAIL_PASSWORD.';
   }
 
   if (error?.code === 'EAUTH') {
@@ -118,7 +149,48 @@ const getEmailServiceErrorMessage = (error) => {
   return 'Failed to send email. Check the backend server logs for more details.';
 };
 
+const sendEmailWithResend = async (mailOptions) => {
+  const { apiKey, from } = getResendConfig();
+
+  if (!from) {
+    const configError = new Error(getEmailServiceErrorMessage());
+    configError.isOperational = true;
+    throw configError;
+  }
+
+  const response = await fetch(RESEND_EMAIL_API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      from: mailOptions.from || from,
+      to: mailOptions.to,
+      subject: mailOptions.subject,
+      html: mailOptions.html,
+      text: mailOptions.text
+    })
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const error = new Error(data?.message || data?.error || 'Resend email API failed.');
+    error.provider = 'resend';
+    error.status = response.status;
+    error.details = data;
+    throw error;
+  }
+
+  return data;
+};
+
 const sendEmail = async (mailOptions) => {
+  if (hasResendConfig()) {
+    return sendEmailWithResend(mailOptions);
+  }
+
   const { user, pass } = getEmailAuthConfig();
 
   if (!user || !pass) {
