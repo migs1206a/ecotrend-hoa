@@ -1,6 +1,7 @@
 //backend/controllers/guardController.js
 const bcrypt = require('bcryptjs');
 const Guard = require('../models/Guard');
+const { validateNameField } = require('../utils/fieldValidation');
 
 // @desc    Get all guards
 // @route   GET /api/guards
@@ -41,6 +42,14 @@ exports.createGuard = async (req, res) => {
   try {
     const { username, password, fullName } = req.body;
 
+    const fullNameValidation = validateNameField(fullName, 'Guard full name', {
+      minLength: 2,
+      maxLength: 80
+    });
+    if (fullNameValidation.error) {
+      return res.status(400).json({ message: fullNameValidation.error });
+    }
+
     const existingGuard = await Guard.findOne({ username });
     if (existingGuard) {
       return res.status(400).json({ message: 'Guard username already exists' });
@@ -51,7 +60,7 @@ exports.createGuard = async (req, res) => {
     const guard = new Guard({
       username,
       password: hashedPassword,
-      fullName,
+      fullName: fullNameValidation.value,
       role: 'GUARD'
     });
 
@@ -77,8 +86,19 @@ exports.createGuard = async (req, res) => {
 exports.updateGuard = async (req, res) => {
   try {
     const { username, password, fullName } = req.body;
-    
-    const updateData = { username, fullName };
+
+    const updateData = { username };
+
+    if (fullName !== undefined) {
+      const fullNameValidation = validateNameField(fullName, 'Guard full name', {
+        minLength: 2,
+        maxLength: 80
+      });
+      if (fullNameValidation.error) {
+        return res.status(400).json({ message: fullNameValidation.error });
+      }
+      updateData.fullName = fullNameValidation.value;
+    }
     
     if (password) {
       updateData.password = await bcrypt.hash(password, 10);

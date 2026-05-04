@@ -10,6 +10,7 @@ const {
 
 // Import auth middleware
 const auth = require('../middleware/auth');
+const { requireOfficerModule } = require('../middleware/accessControl');
 
 // GET /api/announcements - Get all announcements
 router.get('/', getAnnouncements);
@@ -18,12 +19,12 @@ router.get('/', getAnnouncements);
 router.get('/:id', getAnnouncement);
 
 // POST /api/announcements - Create new announcement (protected)
-router.post('/', auth, createAnnouncement);
+router.post('/', auth, requireOfficerModule('announcements'), createAnnouncement);
 
 // PUT /api/announcements/:id - Update announcement (protected)
-router.put('/:id', auth, updateAnnouncement);
+router.put('/:id', auth, requireOfficerModule('announcements'), updateAnnouncement);
 
 // DELETE /api/announcements/:id - Delete announcement (protected)
-router.delete('/:id', auth, deleteAnnouncement);
+router.delete('/:id', auth, requireOfficerModule('announcements'), deleteAnnouncement);
 
 module.exports = router;

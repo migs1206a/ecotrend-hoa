@@ -6,6 +6,11 @@ const adminSchema = new mongoose.Schema({
     required: true,
     unique: true
   },
+  fullName: {
+    type: String,
+    default: '',
+    trim: true
+  },
   password: {
     type: String,
     required: true
@@ -13,6 +18,15 @@ const adminSchema = new mongoose.Schema({
   role: {
     type: String,
     default: 'ADMIN'
+  },
+  position: {
+    type: String,
+    default: '',
+    trim: true
+  },
+  modules: {
+    type: [String],
+    default: undefined
   },
   createdAt: {
     type: Date,

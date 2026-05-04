@@ -3,7 +3,18 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const dns = require('dns');
+const { getFileSizeLimitMessage } = require('./utils/uploadLimits');
 require('dotenv').config();
+
+const configuredDnsServers = String(process.env.DNS_SERVERS || '')
+  .split(',')
+  .map((server) => server.trim())
+  .filter(Boolean);
+
+if (configuredDnsServers.length) {
+  dns.setServers(configuredDnsServers);
+}
 
 const app = express();
 
@@ -14,7 +25,8 @@ app.use(express.json());
 // Create uploads directories if they don't exist
 const uploadsDirectories = [
   path.join(__dirname, 'uploads/identification'),
-  path.join(__dirname, 'uploads/vehicles')
+  path.join(__dirname, 'uploads/vehicles'),
+  path.join(__dirname, 'report-archives')
 ];
 
 uploadsDirectories.forEach(dir => {
@@ -28,7 +40,7 @@ uploadsDirectories.forEach(dir => {
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // MongoDB Connection
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/safeguard';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/ecotrend_housing';
 
 mongoose.connect(MONGODB_URI)
   .then(() => console.log('✓ Connected to MongoDB'))
@@ -58,6 +70,14 @@ app.use('/api/billing', require('./routes/billing'));
 app.use('/api/visitors', visitorRoutes);
 app.use('/api/entry-logs', entryLogRoutes);
 app.use('/api/facilities', require('./routes/facilities'));
+app.use('/api/complaints', require('./routes/complaints'));
+app.use('/api/documents', require('./routes/documents'));
+app.use('/api/admin-bill-audit-logs', require('./routes/adminBillAuditLogs'));
+app.use('/api/contact-hoa', require('./routes/contactHoa'));
+app.use('/api/cctv-feeds', require('./routes/cctvFeeds'));
+app.use('/api/reports', require('./routes/reports'));
+app.use('/api/analytics', require('./routes/analytics'));
+app.use('/api/admin-ai', require('./routes/adminChatbot'));
 app.use('/api/master-admin', masterAdminRoutes);
 
 // Root endpoint
@@ -72,7 +92,11 @@ app.get('/', (req, res) => {
       guards: '/api/guards',
       visitors: '/api/visitors',
       entryLogs: '/api/entry-logs',
-      announcements: '/api/announcements'
+      announcements: '/api/announcements',
+      contactHoa: '/api/contact-hoa',
+      cctvFeeds: '/api/cctv-feeds',
+      analytics: '/api/analytics',
+      adminAI: '/api/admin-ai'
     }
   });
 });
@@ -84,7 +108,7 @@ app.use((err, req, res, next) => {
   // Handle multer errors
   if (err.name === 'MulterError') {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ message: 'File size too large. Maximum size is 5MB.' });
+      return res.status(400).json({ message: getFileSizeLimitMessage(err.limit) });
     }
     return res.status(400).json({ message: 'File upload error: ' + err.message });
   }

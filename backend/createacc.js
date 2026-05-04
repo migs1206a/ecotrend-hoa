@@ -1,36 +1,54 @@
-//wala to pang create ko lang ng tempo acc nakaraan
-
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
-require('dotenv').config();
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 
 const Admin = require('./models/Admin');
 const Guard = require('./models/Guard');
+const MasterAdmin = require('./models/MasterAdmin');
 
 const createAccounts = async () => {
   try {
     await mongoose.connect(process.env.MONGODB_URI);
     console.log('Connected to MongoDB');
 
-    // Create Admin Account
     const adminPassword = await bcrypt.hash('admin123', 10);
-    const admin = new Admin({
-      username: 'admin',
-      password: adminPassword
-    });
-    await admin.save();
-    console.log('✅ Admin account created - Username: admin, Password: admin123');
+    await Admin.findOneAndUpdate(
+      { username: 'admin' },
+      {
+        username: 'admin',
+        password: adminPassword,
+        role: 'ADMIN'
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    console.log('Admin account ready - Username: admin, Password: admin123');
 
-    // Create Guard Account
     const guardPassword = await bcrypt.hash('guard123', 10);
-    const guard = new Guard({
-      username: 'guard',
-      password: guardPassword,
-      fullName: 'Security Guard'
-    });
-    await guard.save();
-    console.log('✅ Guard account created - Username: guard, Password: guard123');
+    await Guard.findOneAndUpdate(
+      { username: 'guard' },
+      {
+        username: 'guard',
+        password: guardPassword,
+        fullName: 'Security Guard',
+        role: 'GUARD'
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    console.log('Guard account ready - Username: guard, Password: guard123');
 
+    const masterPassword = await bcrypt.hash('Carlo', 10);
+    await MasterAdmin.findOneAndUpdate(
+      { username: 'Carlo' },
+      {
+        username: 'Carlo',
+        password: masterPassword,
+        role: 'MASTER_ADMIN'
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    console.log('Master admin account ready - Username: Carlo, Password: Carlo');
+
+    await mongoose.disconnect();
     process.exit(0);
   } catch (error) {
     console.error('Error:', error);

@@ -1,44 +1,84 @@
 const Announcement = require('../models/Announcement');
+const { parsePagination, sendPaginatedResponse } = require('../utils/pagination');
 
 // Get all announcements
 const getAnnouncements = async (req, res) => {
   try {
-    const announcements = await Announcement.find().sort({ createdAt: -1 });
-    res.json(announcements);
+    const pagination = parsePagination(req.query);
+    const filter = {};
+    const search = String(req.query.search || '').trim();
+    const category = String(req.query.category || '').trim();
+    const audience = String(req.query.audience || '').trim();
+    const activeOnly = String(req.query.activeOnly || '').toLowerCase() === 'true';
+
+    if (search) {
+      const searchRegex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      filter.$or = [
+        { title: searchRegex },
+        { content: searchRegex },
+        { postedBy: searchRegex }
+      ];
+    }
+
+    if (category && category !== 'all') {
+      filter.category = category;
+    }
+
+    if (audience && audience !== 'all') {
+      filter.targetAudience = { $in: ['all', audience] };
+    }
+
+    if (activeOnly) {
+      filter.$and = [
+        ...(filter.$and || []),
+        {
+          $or: [
+            { expiryDate: { $exists: false } },
+            { expiryDate: null },
+            { expiryDate: { $gte: new Date() } }
+          ]
+        }
+      ];
+    }
+
+    const query = Announcement.find(filter).sort({ createdAt: -1 });
+
+    if (pagination.enabled) {
+      const [announcements, total] = await Promise.all([
+        query.clone().skip(pagination.skip).limit(pagination.limit),
+        Announcement.countDocuments(filter)
+      ]);
+
+      return sendPaginatedResponse(res, pagination, announcements, total);
+    }
+
+    const announcements = await query;
+    return res.json(announcements);
   } catch (error) {
     console.error('Error fetching announcements:', error);
-    res.status(500).json({ message: 'Error fetching announcements' });
+    return res.status(500).json({ message: 'Error fetching announcements' });
   }
 };
 
 // Create new announcement
 const createAnnouncement = async (req, res) => {
   try {
-    console.log('Creating announcement with data:', req.body);
-    console.log('User from auth middleware:', req.user);
-    
     const { title, content, category, targetAudience, expiryDate, postedBy } = req.body;
 
-    // Validate required fields
     if (!title || !content) {
-      console.log('Validation failed: Missing title or content');
       return res.status(400).json({ message: 'Title and content are required' });
     }
 
-    // Create new announcement
     const announcement = new Announcement({
       title,
       content,
       category: category || 'general',
       targetAudience: targetAudience || 'all',
       expiryDate: expiryDate || null,
-      postedBy: postedBy || 'Admin'
+      postedBy: postedBy || req.user?.fullName || req.user?.username || 'Admin'
     });
 
-    console.log('Saving announcement:', announcement);
     const savedAnnouncement = await announcement.save();
-    console.log('Announcement saved successfully:', savedAnnouncement);
-    
     res.status(201).json(savedAnnouncement);
   } catch (error) {
     console.error('Error creating announcement:', error);

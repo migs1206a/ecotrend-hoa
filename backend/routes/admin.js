@@ -3,6 +3,11 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
+const auth = require('../middleware/auth');
+const { requireManageAccounts } = require('../middleware/accessControl');
+
+router.use(auth);
+router.use(requireManageAccounts);
 
 // Get all admins
 router.get('/', adminController.getAllAdmins);

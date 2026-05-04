@@ -18,6 +18,10 @@ const guardSchema = new mongoose.Schema({
     type: String,
     default: 'Guard'
   },
+  modules: {
+    type: [String],
+    default: undefined
+  },
   createdAt: {
     type: Date,
     default: Date.now

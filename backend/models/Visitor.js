@@ -43,6 +43,28 @@ const VisitorSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  accompanyingVisitors: [{
+    relationshipToResident: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    lastName: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    firstName: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    identification: {
+      type: String,
+      required: true,
+      trim: true
+    }
+  }],
   guardOnDuty: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Guard'

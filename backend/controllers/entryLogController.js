@@ -1,5 +1,16 @@
 //backend/controllers/entryLogController.js
 const EntryLog = require('../models/EntryLog');
+const { parsePagination, sendPaginatedResponse, paginateArray } = require('../utils/pagination');
+const { validateNameField } = require('../utils/fieldValidation');
+
+const normalizePlateNumber = (value) => {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (!normalized) return { value: 'NO-VEHICLE' };
+  if (!/^[A-Z0-9]{1,10}$/.test(normalized)) {
+    return { error: 'Plate number can only contain letters and numbers' };
+  }
+  return { value: normalized };
+};
 
 // @desc    Create entry log
 // @route   POST /api/entry-logs
@@ -20,15 +31,38 @@ exports.createEntryLog = async (req, res) => {
       residentAddress
     } = req.body;
 
+    const ownerNameValidation = validateNameField(ownerName, 'Owner name', {
+      required: false,
+      minLength: 2,
+      maxLength: 80
+    });
+    if (ownerNameValidation.error) {
+      return res.status(400).json({ message: ownerNameValidation.error });
+    }
+
+    const residentNameValidation = validateNameField(residentName, 'Resident name', {
+      required: false,
+      minLength: 2,
+      maxLength: 80
+    });
+    if (residentNameValidation.error) {
+      return res.status(400).json({ message: residentNameValidation.error });
+    }
+
+    const plateValidation = normalizePlateNumber(plateNumber);
+    if (plateValidation.error) {
+      return res.status(400).json({ message: plateValidation.error });
+    }
+
     const entryLog = new EntryLog({
-      plateNumber: plateNumber ? plateNumber.toUpperCase() : 'NO-VEHICLE',
+      plateNumber: plateValidation.value,
       logType,
       vehicleOwnerType: vehicleOwnerType || 'resident',
-      ownerName,
+      ownerName: ownerNameValidation.value,
       vehicleType,
       vehicleColor,
       residentId,
-      residentName,
+      residentName: residentNameValidation.value,
       residentAddress,
       guardOnDuty,
       timestamp: new Date(),
@@ -72,11 +106,21 @@ exports.getAllEntryLogs = async (req, res) => {
       query.guardOnDuty = guardId;
     }
 
-    const logs = await EntryLog.find(query)
+    const pagination = parsePagination(req.query);
+    const baseQuery = EntryLog.find(query)
       .populate('guardOnDuty', 'username fullName')
       .populate('residentId', 'familyName houseAddress street phoneNumber')
       .sort({ timestamp: -1 });
 
+    if (pagination.enabled) {
+      const [items, total] = await Promise.all([
+        baseQuery.clone().skip(pagination.skip).limit(pagination.limit),
+        EntryLog.countDocuments(query)
+      ]);
+      return sendPaginatedResponse(res, pagination, items, total);
+    }
+
+    const logs = await baseQuery;
     res.json(logs);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -94,16 +138,27 @@ exports.getTodayEntryLogs = async (req, res) => {
     const endOfDay = new Date();
     endOfDay.setHours(23, 59, 59, 999);
 
-    const logs = await EntryLog.find({
+    const filter = {
       timestamp: {
         $gte: startOfDay,
         $lte: endOfDay
       }
-    })
+    };
+    const pagination = parsePagination(req.query);
+    const query = EntryLog.find(filter)
       .populate('guardOnDuty', 'username fullName')
       .populate('residentId', 'familyName houseAddress street phoneNumber')
       .sort({ timestamp: -1 });
 
+    if (pagination.enabled) {
+      const [items, total] = await Promise.all([
+        query.clone().skip(pagination.skip).limit(pagination.limit),
+        EntryLog.countDocuments(filter)
+      ]);
+      return sendPaginatedResponse(res, pagination, items, total);
+    }
+
+    const logs = await query;
     res.json(logs);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -194,10 +249,21 @@ exports.getTodayStats = async (req, res) => {
 // @access  Guard/Admin only
 exports.getLogsByGuard = async (req, res) => {
   try {
-    const logs = await EntryLog.find({ guardOnDuty: req.params.guardId })
+    const filter = { guardOnDuty: req.params.guardId };
+    const pagination = parsePagination(req.query);
+    const query = EntryLog.find(filter)
       .populate('residentId', 'familyName houseAddress street phoneNumber')
       .sort({ timestamp: -1 });
 
+    if (pagination.enabled) {
+      const [items, total] = await Promise.all([
+        query.clone().skip(pagination.skip).limit(pagination.limit),
+        EntryLog.countDocuments(filter)
+      ]);
+      return sendPaginatedResponse(res, pagination, items, total);
+    }
+
+    const logs = await query;
     res.json(logs);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -268,7 +334,9 @@ exports.getResidentsInside = async (req, res) => {
     // Sort by most recent entry
     residentsInside.sort((a, b) => b.entryTime - a.entryTime);
 
-    res.json(residentsInside);
+    const pagination = parsePagination(req.query);
+    const paginated = paginateArray(residentsInside, pagination);
+    sendPaginatedResponse(res, pagination, paginated.items, paginated.total);
   } catch (error) {
     console.error('Error fetching residents inside:', error);
     res.status(500).json({ message: 'Server error', error: error.message });

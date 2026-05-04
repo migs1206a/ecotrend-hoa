@@ -1,5 +1,19 @@
 //backend/controllers/deliveryController.js
 const Delivery = require('../models/Delivery');
+const { parsePagination, sendPaginatedResponse } = require('../utils/pagination');
+const {
+  validateNameField,
+  validatePhoneNumberField
+} = require('../utils/fieldValidation');
+
+const normalizePlateNumber = (value) => {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (!normalized) return { value: '' };
+  if (!/^[A-Z0-9]{1,10}$/.test(normalized)) {
+    return { error: 'Plate number can only contain letters and numbers' };
+  }
+  return { value: normalized };
+};
 
 // @desc    Register new delivery
 // @route   POST /api/deliveries
@@ -18,14 +32,32 @@ exports.registerDelivery = async (req, res) => {
       guardOnDuty
     } = req.body;
 
+    const driverNameValidation = validateNameField(driverName, 'Driver name', {
+      minLength: 2,
+      maxLength: 80
+    });
+    if (driverNameValidation.error) {
+      return res.status(400).json({ message: driverNameValidation.error });
+    }
+
+    const contactNumberValidation = validatePhoneNumberField(contactNumber, 'Contact number');
+    if (contactNumberValidation.error) {
+      return res.status(400).json({ message: contactNumberValidation.error });
+    }
+
+    const plateValidation = normalizePlateNumber(vehiclePlateNumber);
+    if (plateValidation.error) {
+      return res.status(400).json({ message: plateValidation.error });
+    }
+
     const delivery = new Delivery({
-      driverName,
-      contactNumber,
+      driverName: driverNameValidation.value,
+      contactNumber: contactNumberValidation.value,
       deliveryAddress: hostResidentAddress,
       hostResident: hostResidentId,
       hostResidentName,
       hostResidentAddress,
-      vehiclePlateNumber,
+      vehiclePlateNumber: plateValidation.value,
       vehicleType,
       vehicleColor,
       guardOnDuty,
@@ -49,12 +81,21 @@ exports.registerDelivery = async (req, res) => {
 // @access  Guard/Admin only
 exports.getAllDeliveries = async (req, res) => {
   try {
-    const deliveries = await Delivery.find()
+    const pagination = parsePagination(req.query);
+    const query = Delivery.find()
       .populate('guardOnDuty', 'username fullName')
       .populate('hostResident', 'familyName houseAddress street phoneNumber')
       .sort({ entryTime: -1 });
-      // REMOVED .limit(50) to show ALL deliveries
 
+    if (pagination.enabled) {
+      const [items, total] = await Promise.all([
+        query.clone().skip(pagination.skip).limit(pagination.limit),
+        Delivery.countDocuments()
+      ]);
+      return sendPaginatedResponse(res, pagination, items, total);
+    }
+
+    const deliveries = await query;
     res.json(deliveries);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -66,11 +107,22 @@ exports.getAllDeliveries = async (req, res) => {
 // @access  Guard/Admin only
 exports.getActiveDeliveries = async (req, res) => {
   try {
-    const activeDeliveries = await Delivery.find({ status: 'inside' })
+    const filter = { status: 'inside' };
+    const pagination = parsePagination(req.query);
+    const query = Delivery.find(filter)
       .populate('guardOnDuty', 'username fullName')
       .populate('hostResident', 'familyName houseAddress street phoneNumber')
       .sort({ entryTime: -1 });
 
+    if (pagination.enabled) {
+      const [items, total] = await Promise.all([
+        query.clone().skip(pagination.skip).limit(pagination.limit),
+        Delivery.countDocuments(filter)
+      ]);
+      return sendPaginatedResponse(res, pagination, items, total);
+    }
+
+    const activeDeliveries = await query;
     res.json(activeDeliveries);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -82,11 +134,21 @@ exports.getActiveDeliveries = async (req, res) => {
 // @access  Resident/Admin only
 exports.getDeliveriesByResident = async (req, res) => {
   try {
-    const deliveries = await Delivery.find({ hostResident: req.params.residentId })
+    const filter = { hostResident: req.params.residentId };
+    const pagination = parsePagination(req.query);
+    const query = Delivery.find(filter)
       .populate('guardOnDuty', 'username fullName')
-      .sort({ entryTime: -1 })
-      .limit(20);
+      .sort({ entryTime: -1 });
 
+    if (pagination.enabled) {
+      const [items, total] = await Promise.all([
+        query.clone().skip(pagination.skip).limit(pagination.limit),
+        Delivery.countDocuments(filter)
+      ]);
+      return sendPaginatedResponse(res, pagination, items, total);
+    }
+
+    const deliveries = await query.limit(20);
     res.json(deliveries);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });

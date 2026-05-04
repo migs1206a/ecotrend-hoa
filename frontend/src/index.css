@@ -1,0 +1,193 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --primary-green: #0f9f71;
+  --primary-green-dark: #0a7f5a;
+  --primary-green-light: #36c995;
+  --primary-green-50: #eefbf5;
+  --primary-green-100: #d7f6e8;
+  --primary-green-200: #afeacc;
+  --accent-teal: #0ea5a4;
+  --accent-blue: #2563eb;
+  --accent-amber: #d97706;
+  --accent-violet: #7c3aed;
+  --white: #ffffff;
+  --gray-50: #f8faf8;
+  --gray-100: #eef2ef;
+  --gray-200: #dde5df;
+  --gray-300: #c6d0c9;
+  --gray-400: #95a39a;
+  --gray-500: #647169;
+  --gray-600: #445049;
+  --gray-700: #2c3631;
+  --gray-800: #1d2520;
+  --gray-900: #0f1612;
+  --red: #e44747;
+  --yellow: #f2a100;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 18, 0.05);
+  --shadow-md: 0 10px 30px rgba(20, 37, 28, 0.08);
+  --shadow-lg: 0 18px 48px rgba(18, 39, 29, 0.12);
+  --shadow-xl: 0 24px 70px rgba(14, 31, 24, 0.14);
+  --shadow-green: 0 18px 40px rgba(15, 159, 113, 0.2);
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --radius-2xl: 30px;
+  --radius-full: 9999px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: var(--gray-900);
+  background:
+    radial-gradient(circle at top left, rgba(54, 201, 149, 0.12), transparent 26%),
+    radial-gradient(circle at 82% 12%, rgba(14, 165, 164, 0.1), transparent 22%),
+    linear-gradient(180deg, #f4faf6 0%, #eef6f1 48%, #f9fcfa 100%);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+img,
+svg,
+video,
+canvas {
+  display: block;
+  max-width: 100%;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+textarea {
+  resize: vertical;
+}
+
+::selection {
+  background: rgba(15, 159, 113, 0.18);
+  color: var(--gray-900);
+}
+
+:focus-visible {
+  outline: 3px solid rgba(15, 159, 113, 0.28);
+  outline-offset: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(221, 229, 223, 0.55);
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(15, 159, 113, 0.55), rgba(14, 165, 164, 0.6));
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.65);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(15, 159, 113, 0.78), rgba(14, 165, 164, 0.8));
+}
+
+input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+select,
+textarea {
+  color: var(--gray-800);
+  caret-color: var(--primary-green-dark);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--gray-400);
+}
+
+button {
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease,
+    opacity 0.18s ease;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+table {
+  width: 100%;
+}
+
+.admin-content,
+.resident-content,
+.guard-content {
+  display: grid;
+  gap: 1.35rem;
+  align-content: start;
+}
+
+.module-stage {
+  position: relative;
+  padding: 1rem;
+  border-radius: calc(var(--radius-2xl) + 4px);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.58) 0%, rgba(255, 255, 255, 0.22) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    0 18px 42px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+}
+
+.module-stage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at top left, rgba(54, 201, 149, 0.16), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(37, 99, 235, 0.08), transparent 24%);
+  pointer-events: none;
+}
+
+.module-stage__inner {
+  position: relative;
+  z-index: 1;
+}
+
+@media (max-width: 767px) {
+  .module-stage {
+    padding: 0.75rem;
+    border-radius: 24px;
+  }
+}

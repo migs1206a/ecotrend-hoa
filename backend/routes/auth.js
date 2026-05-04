@@ -1,58 +1,35 @@
-//backend/routes/auth.js
 const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
+const auth = require('../middleware/auth');
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const User = require('../models/User');
+const EmailVerification = require('../models/EmailVerification');
 const bcrypt = require('bcryptjs');
-
-
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    // Determine destination based on field name
-    let uploadPath;
-    
-    if (file.fieldname === 'identificationDocument') {
-      uploadPath = 'uploads/identification';
-    } else if (file.fieldname.startsWith('vehiclePhoto_')) {
-      uploadPath = 'uploads/vehicles';
-    } else {
-      uploadPath = 'uploads/temp';
-    }
-    
-    // Create directory if it doesn't exist
-    if (!fs.existsSync(uploadPath)) {
-      fs.mkdirSync(uploadPath, { recursive: true });
-    }
-    
-    cb(null, uploadPath);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    
-    if (file.fieldname === 'identificationDocument') {
-      cb(null, 'id-' + uniqueSuffix + ext);
-    } else if (file.fieldname.startsWith('vehiclePhoto_')) {
-      cb(null, 'vehicle-' + uniqueSuffix + ext);
-    } else {
-      cb(null, 'file-' + uniqueSuffix + ext);
-    }
-  }
-});
+const {
+  DOCUMENT_UPLOAD_MAX_BYTES,
+  getFileSizeLimitMessage
+} = require('../utils/uploadLimits');
+const {
+  EMAIL_OTP_EXPIRY_MINUTES,
+  EMAIL_OTP_LENGTH,
+  EMAIL_OTP_RESEND_COOLDOWN_SECONDS,
+  createEmailVerificationToken,
+  generateEmailOtp,
+  hashVerificationValue,
+  normalizeEmail,
+  validateResidentEmail
+} = require('../utils/emailVerification');
 
 const upload = multer({
-  storage: storage,
+  storage: multer.memoryStorage(),
   limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB limit
+    fileSize: DOCUMENT_UPLOAD_MAX_BYTES
   },
-  fileFilter: function (req, file, cb) {
-    // For identification document: accept images and PDFs
+  fileFilter(req, file, cb) {
     if (file.fieldname === 'identificationDocument') {
       const allowedTypes = /jpeg|jpg|png|pdf/;
       const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
@@ -60,131 +37,329 @@ const upload = multer({
 
       if (mimetype && extname) {
         return cb(null, true);
-      } else {
-        return cb(new Error('Identification document must be JPG, PNG, or PDF'));
       }
+      return cb(new Error('Identification document must be JPG, PNG, or PDF'));
     }
-    // For vehicle photos: accept only images
-    else if (file.fieldname.startsWith('vehiclePhoto_')) {
+
+    if (file.fieldname.startsWith('vehiclePhoto_')) {
       const allowedTypes = /jpeg|jpg|png|gif/;
       const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
       const mimetype = allowedTypes.test(file.mimetype);
 
       if (mimetype && extname) {
         return cb(null, true);
-      } else {
-        return cb(new Error('Vehicle photos must be JPG, PNG, or GIF'));
       }
+      return cb(new Error('Vehicle photos must be JPG, PNG, or GIF'));
     }
-    else {
-      // Accept any other files (shouldn't happen, but just in case)
-      cb(null, true);
-    }
+
+    cb(null, true);
   }
 });
 
-// Dynamic multer fields for vehicle photos
 const uploadFields = (req, res, next) => {
-  // Parse the request to determine how many vehicle photos to expect
-  let fields = [
-    { name: 'identificationDocument', maxCount: 1 }
-  ];
-  
-  // Add fields for vehicle photos (support up to 10 vehicles)
-  for (let i = 0; i < 10; i++) {
+  const fields = [{ name: 'identificationDocument', maxCount: 1 }];
+
+  for (let i = 0; i < 10; i += 1) {
     fields.push({ name: `vehiclePhoto_${i}`, maxCount: 1 });
   }
-  
+
   const uploadHandler = upload.fields(fields);
-  
-  // Wrap the upload handler to catch multer errors
-  uploadHandler(req, res, function(err) {
+
+  uploadHandler(req, res, (err) => {
     if (err instanceof multer.MulterError) {
-      // A Multer error occurred when uploading
-      return res.status(400).json({ 
-        message: 'File upload error', 
-        error: err.message 
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({
+          message: getFileSizeLimitMessage(DOCUMENT_UPLOAD_MAX_BYTES)
+        });
+      }
+
+      return res.status(400).json({
+        message: 'File upload error',
+        error: err.message
       });
-    } else if (err) {
-      // An unknown error occurred when uploading
-      return res.status(400).json({ 
+    }
+
+    if (err) {
+      return res.status(400).json({
         message: err.message || 'File upload failed'
       });
     }
-    // Everything went fine, proceed to next middleware
+
     next();
   });
 };
 
-// Configure email transporter (using Gmail as example)
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER, // Your Gmail address
-    pass: process.env.EMAIL_PASSWORD // Your Gmail App Password
+const getEmailAuthConfig = () => ({
+  user: String(process.env.EMAIL_USER || '').trim(),
+  pass: String(process.env.EMAIL_PASSWORD || '').trim()
+});
+
+const createTransporter = () =>
+  nodemailer.createTransport({
+    service: 'gmail',
+    auth: getEmailAuthConfig()
+  });
+
+const getEmailServiceErrorMessage = (error) => {
+  const { user, pass } = getEmailAuthConfig();
+
+  if (!user || !pass) {
+    return 'Email service is not configured. Add EMAIL_USER and EMAIL_PASSWORD to backend/.env, then restart the backend server.';
+  }
+
+  if (error?.code === 'EAUTH') {
+    return 'Email login failed. Check EMAIL_USER and EMAIL_PASSWORD. If you use Gmail, use a Gmail App Password instead of your regular password.';
+  }
+
+  if (['ESOCKET', 'ECONNECTION', 'ETIMEDOUT', 'ENOTFOUND'].includes(error?.code)) {
+    return 'Could not connect to the email service. Check your internet connection and email configuration.';
+  }
+
+  return 'Failed to send email. Check the backend server logs for more details.';
+};
+
+const sendEmail = async (mailOptions) => {
+  const { user, pass } = getEmailAuthConfig();
+
+  if (!user || !pass) {
+    const configError = new Error(getEmailServiceErrorMessage());
+    configError.isOperational = true;
+    throw configError;
+  }
+
+  const transporter = createTransporter();
+  return transporter.sendMail({
+    from: mailOptions.from || user,
+    ...mailOptions
+  });
+};
+
+const isValidEmailAddress = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(email));
+
+const getPasswordValidationMessage = (password) => {
+  const value = String(password || '');
+
+  if (value.length < 8) {
+    return 'Password must be at least 8 characters long';
+  }
+  if (!/[A-Z]/.test(value)) {
+    return 'Password must contain at least one uppercase letter';
+  }
+  if (!/[a-z]/.test(value)) {
+    return 'Password must contain at least one lowercase letter';
+  }
+  if (!/[0-9]/.test(value)) {
+    return 'Password must contain at least one number';
+  }
+  if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(value)) {
+    return 'Password must contain at least one special character';
+  }
+
+  return null;
+};
+
+const buildResetUrl = (resetToken) => {
+  const fallbackUrl = `http://localhost:3000/?token=${encodeURIComponent(resetToken)}`;
+  const configuredFrontendUrl = String(process.env.FRONTEND_URL || 'http://localhost:3000').trim();
+
+  try {
+    const url = new URL(configuredFrontendUrl);
+    url.searchParams.set('token', resetToken);
+    return url.toString();
+  } catch (error) {
+    return fallbackUrl;
+  }
+};
+
+router.post('/email-verification/send-otp', async (req, res) => {
+  try {
+    const emailValidation = validateResidentEmail(req.body?.email);
+    if (emailValidation.error) {
+      return res.status(400).json({ message: emailValidation.error });
+    }
+
+    const email = normalizeEmail(emailValidation.value);
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: 'Email is already registered.' });
+    }
+
+    const existingVerification = await EmailVerification.findOne({ email });
+    const now = new Date();
+
+    if (existingVerification?.sentAt) {
+      const elapsedSeconds = Math.floor((now.getTime() - new Date(existingVerification.sentAt).getTime()) / 1000);
+      if (elapsedSeconds < EMAIL_OTP_RESEND_COOLDOWN_SECONDS) {
+        return res.status(429).json({
+          message: `Please wait ${EMAIL_OTP_RESEND_COOLDOWN_SECONDS - elapsedSeconds} seconds before requesting a new OTP.`,
+          retryAfterSeconds: EMAIL_OTP_RESEND_COOLDOWN_SECONDS - elapsedSeconds
+        });
+      }
+    }
+
+    const otp = generateEmailOtp();
+    const expiresAt = new Date(now.getTime() + EMAIL_OTP_EXPIRY_MINUTES * 60 * 1000);
+
+    await EmailVerification.findOneAndUpdate(
+      { email },
+      {
+        email,
+        otpHash: hashVerificationValue(otp),
+        expiresAt,
+        sentAt: now,
+        attempts: 0
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true
+      }
+    );
+
+    try {
+      await sendEmail({
+        to: email,
+        subject: 'Your Ecotrend HOA Email Verification Code',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="text-align: center; margin-bottom: 30px;">
+              <h2 style="color: #10b981; margin-bottom: 10px;">Verify Your Email</h2>
+            </div>
+            <p style="color: #374151; font-size: 16px;">
+              Use the verification code below to continue your resident registration.
+            </p>
+            <div style="text-align: center; margin: 30px 0;">
+              <div style="display: inline-block; padding: 16px 28px; border-radius: 12px; background: #ecfdf5; border: 1px solid #a7f3d0; font-size: 30px; letter-spacing: 8px; font-weight: 700; color: #047857;">
+                ${otp}
+              </div>
+            </div>
+            <p style="color: #4b5563; font-size: 14px; line-height: 1.6;">
+              This OTP expires in ${EMAIL_OTP_EXPIRY_MINUTES} minutes. If you did not request this code, you can safely ignore this email.
+            </p>
+          </div>
+        `
+      });
+    } catch (mailError) {
+      await EmailVerification.deleteOne({ email }).catch(() => {});
+      throw mailError;
+    }
+
+    res.status(200).json({
+      message: 'Verification OTP sent successfully.',
+      expiresInSeconds: EMAIL_OTP_EXPIRY_MINUTES * 60,
+      retryAfterSeconds: EMAIL_OTP_RESEND_COOLDOWN_SECONDS
+    });
+  } catch (error) {
+    console.error('Send email verification OTP error:', error);
+    res.status(500).json({
+      message: getEmailServiceErrorMessage(error)
+    });
   }
 });
 
-// ============================================
-// 1. REQUEST PASSWORD RESET
-// ============================================
+router.post('/email-verification/verify-otp', async (req, res) => {
+  try {
+    const emailValidation = validateResidentEmail(req.body?.email);
+    if (emailValidation.error) {
+      return res.status(400).json({ message: emailValidation.error });
+    }
+
+    const email = normalizeEmail(emailValidation.value);
+    const otp = String(req.body?.otp || '').trim();
+
+    if (!new RegExp(`^\\d{${EMAIL_OTP_LENGTH}}$`).test(otp)) {
+      return res.status(400).json({ message: `OTP must be exactly ${EMAIL_OTP_LENGTH} digits.` });
+    }
+
+    const verification = await EmailVerification.findOne({ email });
+    if (!verification) {
+      return res.status(400).json({ message: 'No active OTP was found for this email. Please request a new code.' });
+    }
+
+    if (verification.expiresAt.getTime() < Date.now()) {
+      await EmailVerification.deleteOne({ email }).catch(() => {});
+      return res.status(400).json({ message: 'OTP has expired. Please request a new code.' });
+    }
+
+    if (verification.attempts >= 5) {
+      return res.status(429).json({ message: 'Too many invalid OTP attempts. Please request a new code.' });
+    }
+
+    const otpHash = hashVerificationValue(otp);
+    if (otpHash !== verification.otpHash) {
+      verification.attempts += 1;
+      await verification.save();
+
+      return res.status(400).json({ message: 'Invalid OTP. Please try again.' });
+    }
+
+    const verificationToken = createEmailVerificationToken(email);
+    await EmailVerification.deleteOne({ email }).catch(() => {});
+
+    res.status(200).json({
+      message: 'Email verified successfully.',
+      verificationToken
+    });
+  } catch (error) {
+    console.error('Verify email OTP error:', error);
+    res.status(500).json({
+      message: 'Failed to verify OTP.'
+    });
+  }
+});
+
 router.post('/forgot-password', async (req, res) => {
   try {
-    const { email } = req.body;
+    const normalizedEmail = normalizeEmail(req.body?.email);
 
-    // Find user by email
-    const user = await User.findOne({ email });
-    
-    if (!user) {
-      // Don't reveal if email exists or not (security best practice)
-      return res.status(200).json({ 
-        message: 'If that email exists, a password reset link has been sent.' 
+    if (!isValidEmailAddress(normalizedEmail)) {
+      return res.status(400).json({
+        message: 'Please enter a valid email address.'
       });
     }
 
-    // Generate reset token
+    const user = await User.findOne({ email: normalizedEmail });
+
+    if (!user) {
+      return res.status(200).json({
+        message: 'If that email exists, a password reset link has been sent.'
+      });
+    }
+
     const resetToken = crypto.randomBytes(32).toString('hex');
     const resetTokenHash = crypto
       .createHash('sha256')
       .update(resetToken)
       .digest('hex');
 
-    // Save hashed token and expiry to user (expires in 1 hour)
     user.resetPasswordToken = resetTokenHash;
-    user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
-    await user.save();
+    user.resetPasswordExpires = Date.now() + 3600000;
+    await user.save({ validateBeforeSave: false });
 
-    // Create reset URL
-    const resetUrl = `http://localhost:3000/reset-password/${resetToken}`;
-    // For production, use: `${process.env.FRONTEND_URL}/reset-password/${resetToken}`
+    const resetUrl = buildResetUrl(resetToken);
 
-    // Email content
     const mailOptions = {
       from: process.env.EMAIL_USER,
-      to: email,
+      to: normalizedEmail,
       subject: 'Password Reset Request - Ecotrend HOA',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <div style="text-align: center; margin-bottom: 30px;">
             <h2 style="color: #10b981; margin-bottom: 10px;">Password Reset Request</h2>
           </div>
-          
           <p style="color: #374151; font-size: 16px;">Hello <strong>${user.username}</strong>,</p>
-          
           <p style="color: #4b5563; font-size: 15px; line-height: 1.6;">
             You requested to reset your password for your Ecotrend Homeowners Association account.
           </p>
-          
           <p style="color: #4b5563; font-size: 15px; line-height: 1.6;">
             Click the button below to reset your password:
           </p>
-          
           <div style="text-align: center; margin: 35px 0;">
-            <a href="${resetUrl}" 
-               style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); 
-                      color: white; 
-                      padding: 14px 32px; 
-                      text-decoration: none; 
+            <a href="${resetUrl}"
+               style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+                      color: white;
+                      padding: 14px 32px;
+                      text-decoration: none;
                       border-radius: 10px;
                       display: inline-block;
                       font-weight: 600;
@@ -193,129 +368,97 @@ router.post('/forgot-password', async (req, res) => {
               Reset Password
             </a>
           </div>
-          
           <p style="color: #6b7280; font-size: 14px; line-height: 1.6;">
             Or copy and paste this link into your browser:
           </p>
           <p style="color: #10b981; font-size: 14px; word-break: break-all; background: #f0fdf4; padding: 10px; border-radius: 8px;">
             ${resetUrl}
           </p>
-          
-          <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 25px 0; border-radius: 6px;">
-            <p style="color: #92400e; font-size: 14px; margin: 0; font-weight: 600;">
-              ⚠️ This link will expire in 1 hour.
-            </p>
-          </div>
-          
           <p style="color: #6b7280; font-size: 14px; line-height: 1.6;">
-            If you didn't request this password reset, please ignore this email and your password will remain unchanged.
-          </p>
-          
-          <hr style="margin: 30px 0; border: none; border-top: 1px solid #e5e7eb;">
-          
-          <p style="color: #9ca3af; font-size: 12px; text-align: center;">
-            <strong>Ecotrend Homeowners Association</strong><br>
-            This is an automated email, please do not reply.
+            This link will expire in 1 hour. If you did not request a password reset, you can safely ignore this email.
           </p>
         </div>
       `
     };
 
-    // Send email
-    await transporter.sendMail(mailOptions);
+    try {
+      await sendEmail(mailOptions);
+    } catch (mailError) {
+      user.resetPasswordToken = undefined;
+      user.resetPasswordExpires = undefined;
+      await user.save({ validateBeforeSave: false }).catch(() => {});
+      mailError.userMessage = getEmailServiceErrorMessage(mailError);
+      throw mailError;
+    }
 
-    res.status(200).json({ 
-      message: 'Password reset email sent successfully' 
+    res.status(200).json({
+      message: 'If that email exists, a password reset link has been sent.'
     });
-
   } catch (error) {
     console.error('Forgot password error:', error);
-    res.status(500).json({ 
-      message: 'Error sending password reset email' 
+    res.status(500).json({
+      message: error.userMessage || 'Failed to process password reset request.'
     });
   }
 });
 
-// ============================================
-// 2. VERIFY RESET TOKEN
-// ============================================
 router.get('/verify-reset-token/:token', async (req, res) => {
   try {
     const { token } = req.params;
+    const resetTokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
-    // Hash the token from URL
-    const resetTokenHash = crypto
-      .createHash('sha256')
-      .update(token)
-      .digest('hex');
-
-    // Find user with valid token
     const user = await User.findOne({
       resetPasswordToken: resetTokenHash,
       resetPasswordExpires: { $gt: Date.now() }
     });
 
     if (!user) {
-      return res.status(400).json({ 
-        message: 'Invalid or expired reset token' 
+      return res.status(400).json({
+        message: 'Invalid or expired reset token'
       });
     }
 
-    res.status(200).json({ 
-      message: 'Token is valid' 
+    res.status(200).json({
+      message: 'Token is valid'
     });
-
   } catch (error) {
     console.error('Verify token error:', error);
-    res.status(500).json({ 
-      message: 'Error verifying reset token' 
+    res.status(500).json({
+      message: 'Error verifying reset token'
     });
   }
 });
 
-// ============================================
-// 3. RESET PASSWORD
-// ============================================
 router.post('/reset-password', async (req, res) => {
   try {
     const { token, newPassword } = req.body;
 
-    // Validate new password
-    if (!newPassword || newPassword.length < 8) {
-      return res.status(400).json({ 
-        message: 'Password must be at least 8 characters long' 
+    const passwordValidationMessage = getPasswordValidationMessage(newPassword);
+    if (passwordValidationMessage) {
+      return res.status(400).json({
+        message: passwordValidationMessage
       });
     }
 
-    // Hash the token
-    const resetTokenHash = crypto
-      .createHash('sha256')
-      .update(token)
-      .digest('hex');
+    const resetTokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
-    // Find user with valid token
     const user = await User.findOne({
       resetPasswordToken: resetTokenHash,
       resetPasswordExpires: { $gt: Date.now() }
     });
 
     if (!user) {
-      return res.status(400).json({ 
-        message: 'Invalid or expired reset token' 
+      return res.status(400).json({
+        message: 'Invalid or expired reset token'
       });
     }
 
-    // Hash new password
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(newPassword, salt);
-
-    // Clear reset token fields
     user.resetPasswordToken = undefined;
     user.resetPasswordExpires = undefined;
+    await user.save({ validateBeforeSave: false });
 
-    await user.save();
-
-    // Send confirmation email
     const mailOptions = {
       from: process.env.EMAIL_USER,
       to: user.email,
@@ -323,57 +466,35 @@ router.post('/reset-password', async (req, res) => {
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <div style="text-align: center; margin-bottom: 30px;">
-            <h2 style="color: #10b981; margin-bottom: 10px;">✓ Password Changed Successfully</h2>
+            <h2 style="color: #10b981; margin-bottom: 10px;">Password Changed Successfully</h2>
           </div>
-          
           <p style="color: #374151; font-size: 16px;">Hello <strong>${user.username}</strong>,</p>
-          
           <p style="color: #4b5563; font-size: 15px; line-height: 1.6;">
             Your password has been successfully changed.
-          </p>
-          
-          <div style="background: #d1fae5; border-left: 4px solid #10b981; padding: 15px; margin: 25px 0; border-radius: 6px;">
-            <p style="color: #065f46; font-size: 14px; margin: 0;">
-              ✓ Your account is now secured with your new password.
-            </p>
-          </div>
-          
-          <p style="color: #6b7280; font-size: 14px; line-height: 1.6;">
-            If you did not make this change, please contact us immediately at your earliest convenience.
-          </p>
-          
-          <hr style="margin: 30px 0; border: none; border-top: 1px solid #e5e7eb;">
-          
-          <p style="color: #9ca3af; font-size: 12px; text-align: center;">
-            <strong>Ecotrend Homeowners Association</strong><br>
-            This is an automated email, please do not reply.
           </p>
         </div>
       `
     };
 
-    await transporter.sendMail(mailOptions);
+    try {
+      await sendEmail(mailOptions);
+    } catch (mailError) {
+      console.error('Reset password confirmation email error:', mailError);
+    }
 
-    res.status(200).json({ 
-      message: 'Password reset successfully' 
+    res.status(200).json({
+      message: 'Password reset successfully'
     });
-
   } catch (error) {
     console.error('Reset password error:', error);
-    res.status(500).json({ 
-      message: 'Error resetting password' 
+    res.status(500).json({
+      message: 'Failed to reset password'
     });
   }
 });
 
-// Register route with file upload
 router.post('/register', uploadFields, authController.register);
-
-// Login route
 router.post('/login', authController.login);
-
-
-
-
+router.get('/me', auth, authController.me);
 
 module.exports = router;

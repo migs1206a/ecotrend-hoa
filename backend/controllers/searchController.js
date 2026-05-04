@@ -1,6 +1,7 @@
 //backend/controllers/searchController.js
 
 const User = require('../models/User');
+const { isResidentAccountExpired } = require('../utils/residentAccounts');
 
 // @desc    Search residents and vehicles
 // @route   GET /api/guards/search
@@ -25,7 +26,9 @@ exports.searchResidentsAndVehicles = async (req, res) => {
           { houseAddress: { $regex: query, $options: 'i' } },
           { street: { $regex: query, $options: 'i' } }
         ]
-      }).select('-password').limit(10);
+      }).select('-password').limit(20);
+
+      results = results.filter((resident) => !isResidentAccountExpired(resident)).slice(0, 10);
     } else if (type === 'vehicle') {
       // This is handled by the separate route below
       results = [];
@@ -58,6 +61,10 @@ exports.searchVehicles = async (req, res) => {
     const vehicleResults = [];
     
     residents.forEach(resident => {
+      if (isResidentAccountExpired(resident)) {
+        return;
+      }
+
       const matchingVehicles = resident.vehicles.filter(vehicle =>
         vehicle.plateNumber.toLowerCase().includes(query.toLowerCase())
       );

@@ -1,0 +1,310 @@
+.admin-bill-audit-root {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.admin-bill-audit-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.admin-bill-audit-card,
+.admin-bill-audit-form-card,
+.admin-bill-audit-table-card {
+  background: var(--white);
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-sm);
+}
+
+.admin-bill-audit-card {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 1rem 1.1rem;
+}
+
+.admin-bill-audit-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.7rem;
+  height: 2.7rem;
+  border-radius: var(--radius-lg);
+  background: var(--primary-green-50);
+  color: var(--primary-green-dark);
+}
+
+.admin-bill-audit-icon.money {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.admin-bill-audit-icon.accent {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.admin-bill-audit-card p {
+  margin: 0 0 0.25rem;
+  color: var(--gray-500);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.admin-bill-audit-card strong {
+  color: var(--gray-900);
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+
+.admin-bill-audit-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.admin-bill-audit-form-card,
+.admin-bill-audit-table-card {
+  overflow: hidden;
+}
+
+.admin-bill-audit-form-card {
+  padding: 1.2rem;
+}
+
+.admin-bill-audit-form-head,
+.admin-bill-audit-table-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.admin-bill-audit-form-head h3,
+.admin-bill-audit-table-head h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 0 0.3rem;
+}
+
+.admin-bill-audit-form-head p,
+.admin-bill-audit-table-head p {
+  margin: 0;
+  color: var(--gray-500);
+}
+
+.admin-bill-audit-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.7rem 0.9rem;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: var(--gray-100);
+  color: var(--gray-700);
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 700;
+  transition: all 0.2s ease;
+}
+
+.admin-bill-audit-cancel:hover {
+  background: var(--gray-200);
+}
+
+.admin-bill-audit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.admin-bill-audit-inline {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.admin-bill-audit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.admin-bill-audit-field label {
+  color: var(--gray-700);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.admin-bill-audit-field input,
+.admin-bill-audit-field textarea {
+  width: 100%;
+  padding: 0.78rem 0.9rem;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-lg);
+  background: var(--white);
+  color: var(--gray-900);
+  font-size: 0.9rem;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+.admin-bill-audit-field input:focus,
+.admin-bill-audit-field textarea:focus {
+  outline: none;
+  border-color: var(--primary-green);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);
+}
+
+.admin-bill-audit-submit,
+.admin-bill-audit-edit,
+.admin-bill-audit-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border: none;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 700;
+  transition: all 0.2s ease;
+}
+
+.admin-bill-audit-submit {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  background: linear-gradient(135deg, var(--primary-green), var(--accent-teal));
+  color: var(--white);
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.22);
+}
+
+.admin-bill-audit-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(16, 185, 129, 0.32);
+}
+
+.admin-bill-audit-submit:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.admin-bill-audit-table-head {
+  padding: 1.2rem 1.2rem 0;
+}
+
+.admin-bill-audit-table-wrap {
+  overflow-x: auto;
+}
+
+.admin-bill-audit-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.admin-bill-audit-table thead tr {
+  background: var(--gray-50);
+  border-top: 1px solid var(--gray-100);
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.admin-bill-audit-table th {
+  padding: 0.8rem 1rem;
+  text-align: left;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--gray-500);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.admin-bill-audit-table td {
+  padding: 0.95rem 1rem;
+  border-bottom: 1px solid var(--gray-100);
+  vertical-align: top;
+}
+
+.admin-bill-audit-table tbody tr:hover {
+  background: var(--primary-green-50);
+}
+
+.admin-bill-audit-bill strong,
+.admin-bill-audit-actor strong {
+  display: block;
+  color: var(--gray-900);
+}
+
+.admin-bill-audit-bill span,
+.admin-bill-audit-actor span {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--gray-500);
+  font-size: 0.78rem;
+}
+
+.admin-bill-audit-amount {
+  color: var(--primary-green-dark);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.admin-bill-audit-notes {
+  min-width: 14rem;
+  color: var(--gray-700);
+  white-space: pre-wrap;
+}
+
+.admin-bill-audit-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  white-space: nowrap;
+}
+
+.admin-bill-audit-edit,
+.admin-bill-audit-delete {
+  padding: 0.55rem 0.8rem;
+  font-size: 0.78rem;
+}
+
+.admin-bill-audit-edit {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.admin-bill-audit-delete {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+@media (max-width: 1100px) {
+  .admin-bill-audit-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 767px) {
+  .admin-bill-audit-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-bill-audit-inline {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-bill-audit-form-head,
+  .admin-bill-audit-table-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
