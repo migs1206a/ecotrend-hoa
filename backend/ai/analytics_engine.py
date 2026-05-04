@@ -1,18 +1,33 @@
 import json
 import math
+import os
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
-try:
-    import numpy as np
-    from sklearn.ensemble import IsolationForest
+ML_ENABLED = str(os.environ.get("AI_ANALYTICS_ENABLE_ML", "false")).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+ML_IMPORT_ERROR = None
 
-    ML_AVAILABLE = True
-except Exception:
-    np = None
-    IsolationForest = None
-    ML_AVAILABLE = False
+
+def load_ml_dependencies():
+    global ML_IMPORT_ERROR
+
+    if not ML_ENABLED:
+        return None, None
+
+    try:
+        import numpy as np
+        from sklearn.ensemble import IsolationForest
+
+        return np, IsolationForest
+    except Exception as error:
+        ML_IMPORT_ERROR = str(error)
+        return None, None
 
 
 def clamp(value, minimum, maximum):
@@ -552,7 +567,7 @@ def detect_complaint_clusters(complaints):
 
 
 def build_ml_anomalies(entry_logs, visitors, deliveries, now):
-    if not ML_AVAILABLE:
+    if not ML_ENABLED:
         return []
 
     event_vectors = []
@@ -644,6 +659,11 @@ def build_ml_anomalies(entry_logs, visitors, deliveries, now):
         )
 
     if len(event_vectors) < 18:
+        return []
+
+    np, IsolationForest = load_ml_dependencies()
+
+    if np is None or IsolationForest is None:
         return []
 
     features = np.array([item["features"] for item in event_vectors], dtype=float)
@@ -966,8 +986,8 @@ def analyze(payload):
         "windowStart": to_iso(window_start),
         "engine": {
             "language": "python",
-            "mode": "ml-enhanced" if ML_AVAILABLE else "heuristic",
-            "mlAvailable": ML_AVAILABLE
+            "mode": "ml-enhanced" if ML_ENABLED and ML_IMPORT_ERROR is None else "heuristic",
+            "mlAvailable": ML_ENABLED and ML_IMPORT_ERROR is None
         },
         "summary": summary,
         "highlights": build_highlights(hourly_activity, facility_usage, complaint_insights, repeat_visitors),

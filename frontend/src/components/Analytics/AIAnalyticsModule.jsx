@@ -23,6 +23,8 @@ const WINDOW_OPTIONS = [
   { value: 180, label: '180 days' }
 ];
 
+const ANALYTICS_REQUEST_TIMEOUT_MS = 90000;
+
 const numberFormatter = new Intl.NumberFormat('en-PH');
 const currencyFormatter = new Intl.NumberFormat('en-PH', {
   style: 'currency',
@@ -143,6 +145,8 @@ const AIAnalyticsModule = ({ token, showAlert }) => {
 
   const fetchAnalytics = useCallback(
     async (days, { silent = false } = {}) => {
+      let timeoutId;
+
       try {
         setError('');
         if (silent) {
@@ -151,10 +155,19 @@ const AIAnalyticsModule = ({ token, showAlert }) => {
           setLoading(true);
         }
 
-        const response = await fetch(apiUrl(`/analytics/overview?days=${days}`), {
+        const controller = new AbortController();
+        timeoutId = window.setTimeout(() => controller.abort(), ANALYTICS_REQUEST_TIMEOUT_MS);
+        const query = new URLSearchParams({ days: String(days) });
+
+        if (silent) {
+          query.set('refresh', 'true');
+        }
+
+        const response = await fetch(apiUrl(`/analytics/overview?${query.toString()}`), {
           headers: {
             Authorization: `Bearer ${token}`
-          }
+          },
+          signal: controller.signal
         });
         const data = await response.json();
 
@@ -164,13 +177,19 @@ const AIAnalyticsModule = ({ token, showAlert }) => {
 
         setAnalytics(data);
       } catch (fetchError) {
-        const message = fetchError.message || 'Unable to load AI analytics';
+        const message =
+          fetchError.name === 'AbortError'
+            ? 'AI analytics is taking too long on the free server. Please try again after the backend wakes up.'
+            : fetchError.message || 'Unable to load AI analytics';
         setError(message);
 
         if (typeof showAlert === 'function') {
           showAlert(message);
         }
       } finally {
+        if (timeoutId) {
+          window.clearTimeout(timeoutId);
+        }
         setLoading(false);
         setRefreshing(false);
       }

@@ -11,7 +11,11 @@ const ANALYTICS_SCRIPT_PATH = path.join(__dirname, '..', 'ai', 'analytics_engine
 const DEFAULT_WINDOW_DAYS = 30;
 const MIN_WINDOW_DAYS = 7;
 const MAX_WINDOW_DAYS = 180;
-const PYTHON_TIMEOUT_MS = 30000;
+const PYTHON_TIMEOUT_MS = Number(process.env.ANALYTICS_TIMEOUT_MS || 60000);
+const ANALYTICS_CACHE_TTL_MS = Number(process.env.ANALYTICS_CACHE_TTL_MS || 5 * 60 * 1000);
+const MAX_ANALYTICS_RECORDS = Number(process.env.ANALYTICS_MAX_RECORDS || 1000);
+
+const analyticsCache = new Map();
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
@@ -146,6 +150,43 @@ const runPythonAnalytics = async (payload) => {
   throw new Error(`Unable to run Python analytics engine. ${errors.join(' | ')}`);
 };
 
+const getCacheKey = (windowDays) => `overview:${windowDays}`;
+
+const getCachedAnalytics = (cacheKey, { allowExpired = false } = {}) => {
+  const cached = analyticsCache.get(cacheKey);
+
+  if (!cached) {
+    return null;
+  }
+
+  if (Date.now() - cached.createdAt > ANALYTICS_CACHE_TTL_MS) {
+    if (!allowExpired) {
+      analyticsCache.delete(cacheKey);
+      return null;
+    }
+
+    return {
+      ...cached.analytics,
+      cached: true,
+      stale: true,
+      cacheGeneratedAt: new Date(cached.createdAt).toISOString()
+    };
+  }
+
+  return {
+    ...cached.analytics,
+    cached: true,
+    cacheGeneratedAt: new Date(cached.createdAt).toISOString()
+  };
+};
+
+const setCachedAnalytics = (cacheKey, analytics) => {
+  analyticsCache.set(cacheKey, {
+    createdAt: Date.now(),
+    analytics
+  });
+};
+
 const buildAnalyticsPayload = ({
   windowDays,
   windowStart,
@@ -228,6 +269,17 @@ const buildAnalyticsPayload = ({
 const getAnalyticsOverview = async (req, res) => {
   try {
     const windowDays = parseWindowDays(req.query.days);
+    const cacheKey = getCacheKey(windowDays);
+    const forceRefresh = String(req.query.refresh || '').toLowerCase() === 'true';
+
+    if (!forceRefresh) {
+      const cachedAnalytics = getCachedAnalytics(cacheKey);
+
+      if (cachedAnalytics) {
+        return res.json(cachedAnalytics);
+      }
+    }
+
     const windowStart = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
 
     const [
@@ -253,6 +305,7 @@ const getAnalyticsOverview = async (req, res) => {
       })
         .select('timestamp logType vehicleOwnerType plateNumber ownerName residentName residentAddress notes')
         .sort({ timestamp: -1 })
+        .limit(MAX_ANALYTICS_RECORDS)
         .lean(),
       Visitor.find({
         $or: [
@@ -263,6 +316,7 @@ const getAnalyticsOverview = async (req, res) => {
       })
         .select('createdAt expectedDate entryTime exitTime status name purpose hostResidentName hostResidentAddress vehiclePlateNumber vehicleType')
         .sort({ createdAt: -1 })
+        .limit(MAX_ANALYTICS_RECORDS)
         .lean(),
       Delivery.find({
         $or: [
@@ -272,6 +326,7 @@ const getAnalyticsOverview = async (req, res) => {
       })
         .select('createdAt entryTime exitTime status driverName deliveryAddress hostResidentName hostResidentAddress vehiclePlateNumber vehicleType')
         .sort({ createdAt: -1 })
+        .limit(MAX_ANALYTICS_RECORDS)
         .lean(),
       FacilityReservation.find({
         $or: [
@@ -281,6 +336,7 @@ const getAnalyticsOverview = async (req, res) => {
       })
         .select('createdAt dateReserved endDateTime facilityName durationHours numberOfGuests totalAmount hourlyRate paymentStatus status')
         .sort({ dateReserved: -1 })
+        .limit(MAX_ANALYTICS_RECORDS)
         .lean(),
       Complaint.find({
         isArchived: { $ne: true },
@@ -291,6 +347,7 @@ const getAnalyticsOverview = async (req, res) => {
       })
         .select('createdAt reviewedAt complaintType complainantName complainantAddress subject location status')
         .sort({ createdAt: -1 })
+        .limit(MAX_ANALYTICS_RECORDS)
         .lean()
     ]);
 
@@ -308,10 +365,23 @@ const getAnalyticsOverview = async (req, res) => {
     });
 
     const analytics = await runPythonAnalytics(analyticsPayload);
+    setCachedAnalytics(cacheKey, analytics);
 
     res.json(analytics);
   } catch (error) {
     console.error('Analytics overview error:', error);
+
+    const fallbackAnalytics = getCachedAnalytics(getCacheKey(parseWindowDays(req.query.days)), {
+      allowExpired: true
+    });
+
+    if (fallbackAnalytics) {
+      return res.json({
+        ...fallbackAnalytics,
+        warning: 'Showing the most recent cached analytics because a fresh AI run took too long.'
+      });
+    }
+
     res.status(500).json({
       message: 'Unable to generate AI analytics right now',
       error:

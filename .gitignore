@@ -20,6 +20,7 @@ frontend/ui-revert-backups
 frontend/.env
 frontend/.env.local
 frontend/.env.production
+frontend/*.zip
 #
 .env
 .env.production

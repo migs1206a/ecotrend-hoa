@@ -449,6 +449,25 @@ const extractOpenAIResponseText = (data) => {
   return normalizeText(contentText);
 };
 
+const getOpenAIErrorMessage = (status, data) => {
+  const rawMessage = normalizeText(data?.error?.message || data?.message);
+  const lowerMessage = rawMessage.toLowerCase();
+
+  if (status === 401 || lowerMessage.includes('api key')) {
+    return 'AI chatbot is not configured with a valid OpenAI API key. Update OPENAI_API_KEY in Render, then redeploy.';
+  }
+
+  if (status === 429 || lowerMessage.includes('quota') || lowerMessage.includes('billing')) {
+    return 'AI chatbot could not run because the OpenAI account has no available quota or billing is not active.';
+  }
+
+  if (status === 400 && lowerMessage.includes('model')) {
+    return 'AI chatbot model is not available for this OpenAI account. Check OPENAI_MODEL in Render.';
+  }
+
+  return 'AI chatbot could not reach OpenAI right now. Please check the backend configuration and try again.';
+};
+
 const askAdminChatbot = async (req, res) => {
   try {
     const message = normalizeText(req.body?.message);
@@ -514,8 +533,13 @@ const askAdminChatbot = async (req, res) => {
     const data = await openAIResponse.json();
 
     if (!openAIResponse.ok) {
-      const apiMessage = data?.error?.message || data?.message || 'OpenAI request failed.';
-      return res.status(502).json({ message: apiMessage });
+      console.error('OpenAI chatbot request failed:', {
+        status: openAIResponse.status,
+        message: data?.error?.message || data?.message || 'OpenAI request failed.'
+      });
+      return res.status(502).json({
+        message: getOpenAIErrorMessage(openAIResponse.status, data)
+      });
     }
 
     const reply = extractOpenAIResponseText(data);

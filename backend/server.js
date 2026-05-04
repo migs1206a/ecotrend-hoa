@@ -18,8 +18,29 @@ if (configuredDnsServers.length) {
 
 const app = express();
 
+const configuredFrontendUrls = String(process.env.FRONTEND_URL || '')
+  .split(',')
+  .map((origin) => origin.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
+
+const allowedCorsOrigins = new Set([
+  ...configuredFrontendUrls,
+  'https://ecotrendhoa.com',
+  'https://www.ecotrendhoa.com',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000'
+]);
+
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedCorsOrigins.has(String(origin).replace(/\/+$/, ''))) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('Not allowed by CORS'));
+  }
+}));
 app.use(express.json());
 
 // Create uploads directories if they don't exist
