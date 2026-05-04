@@ -120,33 +120,33 @@ const getEmailServiceErrorMessage = (error) => {
 
   if (error?.provider === 'resend') {
     if (error.status === 401 || error.status === 403) {
-      return 'Email API login failed. Check RESEND_API_KEY in Render.';
+      return 'Email service is not configured correctly yet. Please contact the HOA admin.';
     }
 
     if (error.status === 422 || /domain|from/i.test(error.message || '')) {
-      return 'Email sender is not verified. Verify your domain in Resend and set EMAIL_FROM, for example Ecotrend HOA <noreply@ecotrendhoa.com>.';
+      return 'Email sender is not verified yet. Please contact the HOA admin.';
     }
 
-    return 'Email API failed to send the message. Check Render logs and your Resend dashboard.';
+    return 'Email service is temporarily unavailable. Please try again later.';
   }
 
   if (apiKey && !from) {
-    return 'Email sender is not configured. Add EMAIL_FROM in Render, for example Ecotrend HOA <noreply@ecotrendhoa.com>.';
+    return 'Email service is not configured correctly yet. Please contact the HOA admin.';
   }
 
   if (!apiKey && (!user || !pass)) {
-    return 'Email service is not configured. On Render Free, add RESEND_API_KEY and EMAIL_FROM. For local Gmail SMTP, add EMAIL_USER and EMAIL_PASSWORD.';
+    return 'Email service is not configured yet. Please contact the HOA admin.';
   }
 
   if (error?.code === 'EAUTH') {
-    return 'Email login failed. Check EMAIL_USER and EMAIL_PASSWORD. If you use Gmail, use a Gmail App Password instead of your regular password.';
+    return 'Email service is not configured correctly yet. Please contact the HOA admin.';
   }
 
   if (['ESOCKET', 'ECONNECTION', 'ETIMEDOUT', 'ENOTFOUND'].includes(error?.code)) {
-    return 'Could not connect to the email service. Check your internet connection and email configuration.';
+    return 'Could not connect to the email service. Please try again later.';
   }
 
-  return 'Failed to send email. Check the backend server logs for more details.';
+  return 'Failed to send email. Please try again later.';
 };
 
 const sendEmailWithResend = async (mailOptions) => {
