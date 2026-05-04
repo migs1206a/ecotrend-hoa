@@ -165,7 +165,7 @@ const sendEmailWithResend = async (mailOptions) => {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      from: mailOptions.from || from,
+      from,
       to: mailOptions.to,
       subject: mailOptions.subject,
       html: mailOptions.html,
