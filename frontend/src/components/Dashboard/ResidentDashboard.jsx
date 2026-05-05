@@ -1515,7 +1515,8 @@ const handlePermanentDelete = (vehicleId) => {
 
   // ── Render ───────────────────────────────────────────────────────
   return (
-    <div className="resident-dashboard">
+    <div className={`resident-dashboard ${sidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
+      <div className={`sidebar-backdrop ${sidebarOpen ? 'active' : ''}`} onClick={() => setSidebarOpen(false)} />
       <aside className={`resident-sidebar ${sidebarOpen ? 'open' : 'closed'}`}>
         <div className="sidebar-header">
           {sidebarOpen && (
@@ -1534,7 +1535,16 @@ const handlePermanentDelete = (vehicleId) => {
             const Icon = item.icon;
             const isActive = activeModule === item.id;
             return (
-              <button key={item.id} onClick={() => setActiveModule(item.id)} className={`nav-item ${isActive ? 'active' : ''}`}>
+              <button
+                key={item.id}
+                onClick={() => {
+                  setActiveModule(item.id);
+                  if (window.innerWidth <= 767) {
+                    setSidebarOpen(false);
+                  }
+                }}
+                className={`nav-item ${isActive ? 'active' : ''}`}
+              >
                 <Icon size={20} />
                 {sidebarOpen && <><span className="nav-item-label">{item.label}</span>{isActive && <ChevronRight size={16} />}</>}
               </button>
@@ -1562,7 +1572,11 @@ const handlePermanentDelete = (vehicleId) => {
             </div>
           </div>
         </header>
-        <div className="resident-content">{renderContent()}</div>
+        <div className="resident-content">
+          <div key={activeModule} className="module-view-transition">
+            {renderContent()}
+          </div>
+        </div>
       </main>
     </div>
   );

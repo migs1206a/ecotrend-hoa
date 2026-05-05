@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './App.css';
 import LoginPage from './components/Login/LoginPage';
 import RegisterPage from './components/Register/RegisterPage';
@@ -114,6 +114,23 @@ const clearResetLocation = () => {
   window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
 };
 
+const getJwtExpiryMs = (token) => {
+  try {
+    const parts = String(token || '').split('.');
+    if (parts.length !== 3) {
+      return null;
+    }
+    const payload = JSON.parse(atob(parts[1]));
+    const expSeconds = Number(payload?.exp);
+    if (!Number.isFinite(expSeconds)) {
+      return null;
+    }
+    return expSeconds * 1000;
+  } catch (error) {
+    return null;
+  }
+};
+
 /* ─────────────────────────────────────────────────────────────────
    APP
 ───────────────────────────────────────────────────────────────── */
@@ -121,7 +138,10 @@ const App = () => {
   const [currentPage, setCurrentPage] = useState('login');
   const [userRole, setUserRole]       = useState(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [showLoginRedirect, setShowLoginRedirect] = useState(false);
   const [resetToken, setResetToken]   = useState(null);
+  const loginRedirectTimerRef = useRef(null);
+  const idleTimerRef = useRef(null);
 
   // ── Global Modal State ─────────────────────────────────────────
   const [confirmModal, setConfirmModal] = useState({ open: false, message: '', onConfirm: null });
@@ -133,6 +153,13 @@ const App = () => {
 
   const showAlert = (message, type = 'info') => setAlertModal({ open: true, message, type });
   const closeAlert = () => setAlertModal({ open: false, message: '', type: 'info' });
+  const performLogout = useCallback(() => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('role');
+    localStorage.removeItem('user');
+    setUserRole(null);
+    setCurrentPage('login');
+  }, []);
 
   // ── Inject global styles once ──────────────────────────────────
   useEffect(() => {
@@ -141,6 +168,15 @@ const App = () => {
     if (!document.getElementById('app-modal-styles')) {
       tag.textContent = MODAL_STYLES;
       document.head.appendChild(tag);
+    }
+  }, []);
+
+  useEffect(() => () => {
+    if (loginRedirectTimerRef.current) {
+      clearTimeout(loginRedirectTimerRef.current);
+    }
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
     }
   }, []);
 
@@ -161,12 +197,22 @@ const App = () => {
   useEffect(() => {
     const token = localStorage.getItem('token');
     const role  = localStorage.getItem('role');
-    if (token && role) { setUserRole(role); setCurrentPage('dashboard'); }
+    const tokenExpiryMs = getJwtExpiryMs(token);
+    const isExpired = Number.isFinite(tokenExpiryMs) && tokenExpiryMs <= Date.now();
+    if (token && role && !isExpired) { setUserRole(role); setCurrentPage('dashboard'); }
+    if (isExpired) { performLogout(); }
     const tokenFromUrl = extractResetTokenFromLocation();
     if (tokenFromUrl) { setResetToken(tokenFromUrl); setCurrentPage('reset-password'); }
-  }, []);
+  }, [performLogout]);
 
-  const handleLoginSuccess = (role) => { setUserRole(role); setCurrentPage('dashboard'); };
+  const handleLoginSuccess = (role) => {
+    setShowLoginRedirect(true);
+    loginRedirectTimerRef.current = setTimeout(() => {
+      setUserRole(role);
+      setCurrentPage('dashboard');
+      setShowLoginRedirect(false);
+    }, 1100);
+  };
 
   const handleRegisterSuccess = () => {
     setShowSuccess(true);
@@ -175,12 +221,41 @@ const App = () => {
 
   // ── Logout — uses custom confirm modal ─────────────────────────
   const handleLogout = () => {
-  localStorage.removeItem('token');
-  localStorage.removeItem('role');
-  localStorage.removeItem('user');
-  setUserRole(null);
-  setCurrentPage('login');
-};
+    performLogout();
+  };
+
+  useEffect(() => {
+    if (currentPage !== 'dashboard' || !userRole) {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+      }
+      return undefined;
+    }
+
+    const timeoutFromEnv = Number(process.env.REACT_APP_IDLE_TIMEOUT_MINUTES || 45);
+    const idleTimeoutMinutes = Math.min(60, Math.max(30, Number.isFinite(timeoutFromEnv) ? timeoutFromEnv : 45));
+    const idleTimeoutMs = idleTimeoutMinutes * 60 * 1000;
+    const activityEvents = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
+
+    const resetIdleTimer = () => {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+      }
+      idleTimerRef.current = setTimeout(() => {
+        performLogout();
+      }, idleTimeoutMs);
+    };
+
+    activityEvents.forEach((eventName) => window.addEventListener(eventName, resetIdleTimer, true));
+    resetIdleTimer();
+
+    return () => {
+      activityEvents.forEach((eventName) => window.removeEventListener(eventName, resetIdleTimer, true));
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+      }
+    };
+  }, [currentPage, userRole, performLogout]);
 
   const navigateToRegister       = () => setCurrentPage('register');
   const navigateToLogin          = () => { clearResetLocation(); setResetToken(null); setCurrentPage('login'); };
@@ -241,6 +316,24 @@ const App = () => {
             you can sign in and start using the resident portal.
           </p>
           <div className="app-success-meta">Redirecting back to login shortly</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (showLoginRedirect) {
+    return (
+      <div className="app-login-redirect-screen">
+        <div className="app-login-redirect-card">
+          <div className="app-login-redirect-ring">
+            <div className="app-login-redirect-check">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 7L10 17l-5-5" />
+              </svg>
+            </div>
+          </div>
+          <h2 className="app-login-redirect-title">Login Successful</h2>
+          <p className="app-login-redirect-copy">Preparing your dashboard...</p>
         </div>
       </div>
     );

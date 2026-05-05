@@ -3,7 +3,7 @@ import ecohoa from '../../assets/ecohoa.png';
 import { apiUrl } from '../../utils/api';
 import { 
   Home, LogOut, Users, Car, UserCheck, Calendar, 
-  Bell, BarChart3, FileText, Settings, Shield,
+  Bell, BarChart3, FileText, Shield,
   Menu, X, ChevronRight, TrendingUp, AlertCircle, CheckCircle, XCircle,
   Eye, Download, Search, Clock, MapPin, Phone, Package, User,
   LayoutGrid, Table2, Mail, Bot, Receipt, Camera, Map as MapIcon
@@ -819,7 +819,6 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
     { id: 'ai_chatbot',      icon: Bot,         label: 'AI Chatbot', permission: 'ai_chatbot' },
     { id: 'subdivision_map', icon: MapIcon,     label: '3D Mapped Subdivision', permission: 'subdivision_map' },
     { id: 'reports',         icon: FileText,    label: 'Reports', permission: 'reports' },
-    { id: 'settings',        icon: Settings,    label: 'Settings', permission: 'settings' },
     { id: 'manage_accounts', icon: Shield,      label: 'Manage Accounts', permission: 'manage_accounts' }
   ];
 
@@ -880,7 +879,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
   );
 
   // ── Tables ───────────────────────────────────────────────────────
-  const ApprovedResidentsTable = ({ residents }) => (
+  const renderApprovedResidentsTable = (residents) => (
     <ScrollableTableWrapper>
       <table className="residents-table">
         <thead>
@@ -915,7 +914,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
     </ScrollableTableWrapper>
   );
 
-  const PendingResidentsTable = ({ residents }) => (
+  const renderPendingResidentsTable = (residents) => (
     <ScrollableTableWrapper>
       <table className="residents-table">
         <thead>
@@ -947,7 +946,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
     </ScrollableTableWrapper>
   );
 
-  const VehiclesTable = ({ vehicles }) => (
+  const renderVehiclesTable = (vehicles) => (
     <ScrollableTableWrapper>
       <table className="residents-table">
         <thead>
@@ -971,7 +970,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
     </ScrollableTableWrapper>
   );
 
-  const VisitorLogsTable = ({ visitors }) => (
+  const renderVisitorLogsTable = (visitors) => (
     <ScrollableTableWrapper>
       <table className="residents-table">
         <thead>
@@ -1256,7 +1255,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
                           </div>
                         );
                       })}</div>
-                    : <ApprovedResidentsTable residents={filteredApproved} />}
+                    : renderApprovedResidentsTable(filteredApproved)}
                   <PaginationControls pagination={approvedResidentsPagination} onPageChange={setApprovedResidentsPage} />
                 </>
         ) : (
@@ -1292,7 +1291,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
                           <div className="card-click-hint">Click to review &amp; approve</div>
                         </div>
                       ))}</div>
-                    : <PendingResidentsTable residents={filteredPending} />}
+                    : renderPendingResidentsTable(filteredPending)}
                   <PaginationControls pagination={pendingResidentsPagination} onPageChange={setPendingResidentsPage} />
                 </>
         )}
@@ -1363,7 +1362,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
                           </div>
                         </div>
                       ))}</div>
-                    : <VehiclesTable vehicles={filteredVehicles} />}
+                    : renderVehiclesTable(filteredVehicles)}
                   <PaginationControls pagination={vehiclesPagination} onPageChange={setVehiclesPage} />
                 </>
           }
@@ -1438,7 +1437,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
                     <PaginationControls pagination={visitorLogsPagination} onPageChange={setVisitorLogsPage} />
                   </>
                 : <>
-                    <VisitorLogsTable visitors={visibleVisitors} />
+                    {renderVisitorLogsTable(visibleVisitors)}
                     <PaginationControls pagination={visitorLogsPagination} onPageChange={setVisitorLogsPage} />
                   </>
           }
@@ -1446,10 +1445,6 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
       </div>
     );
   };
-
-  const ModulePlaceholder = ({ title }) => (
-    <div className="module-placeholder"><div className="placeholder-content"><div className="placeholder-icon"><span>🚧</span></div><h2>{title}</h2><p>This module is under development</p><small>Full functionality will be available soon</small></div></div>
-  );
 
   const wrapModule = (content) => (
     <div className="module-stage">
@@ -1475,7 +1470,6 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
       case 'ai_chatbot':     return wrapModule(<AdminAIChatbotModule token={token} showAlert={showAlert} />);
       case 'subdivision_map': return wrapModule(<SubdivisionMap3D role={getUserRoleLabel(user)} />);
       case 'reports':        return wrapModule(<AdminReportsManagement token={token} />);
-      case 'settings':       return wrapModule(<ModulePlaceholder title="Settings" />);
       case 'manage_accounts': return wrapModule(<ManageAccountsModule showConfirm={showConfirm} showAlert={showAlert} />);
       default:               return <OverviewContent />;
     }
@@ -1483,7 +1477,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
 
   // ── Render ───────────────────────────────────────────────────────
   return (
-    <div className="admin-dashboard">
+    <div className={`admin-dashboard ${sidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
       <div className={`sidebar-backdrop ${sidebarOpen ? 'active' : ''}`} onClick={() => setSidebarOpen(false)} />
 
       <aside className={`admin-sidebar ${sidebarOpen ? 'open' : 'closed'}`}>
@@ -1530,7 +1524,11 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
             </div>
           </div>
         </header>
-        <div className="admin-content">{renderContent()}</div>
+        <div className="admin-content">
+          <div key={activeModule} className="module-view-transition">
+            {renderContent()}
+          </div>
+        </div>
       </main>
     </div>
   );

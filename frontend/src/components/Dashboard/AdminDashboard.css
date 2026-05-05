@@ -132,6 +132,7 @@ body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Seg
 
 /* ── Main ── */
 .admin-main { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; }
+.admin-main { transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1); }
 
 .admin-header {
   background: rgba(255,255,255,0.95); backdrop-filter: blur(20px);
@@ -167,6 +168,21 @@ body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Seg
 
 .admin-content { min-width: 0; padding: 2.5rem; }
 .admin-content > * { min-width: 0; }
+.module-view-transition {
+  animation: moduleFadeSlide 0.26s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: top center;
+}
+
+@keyframes moduleFadeSlide {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
 
 /* ── Page Header ── */
 .page-header { display: flex; align-items: center; justify-content: space-between; min-width: 0; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem; }
@@ -260,11 +276,16 @@ body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Seg
   border-bottom: 2px solid var(--gray-100);
 }
 
+.admin-announcement-head > div {
+  min-width: 0;
+}
+
 .admin-announcement-head h3 {
   margin: 0.35rem 0 0;
   color: var(--gray-900);
   font-size: 1.35rem;
   line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .admin-overview-kicker {
@@ -978,6 +999,9 @@ body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Seg
 /* ── MOBILE (max-width: 767px) ── */
 /* NOTE: Every rule here is inside this one block — braces must all be closed before the final } */
 @media (max-width: 767px) {
+  .admin-dashboard.sidebar-open .admin-main {
+    transform: translateX(2px);
+  }
   .sidebar-backdrop.active {
     display: block;
   }
@@ -1020,7 +1044,18 @@ body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Seg
   .admin-announcement-card,
   .admin-overview-recent-card { padding: 1.25rem; }
   .admin-announcement-head { flex-direction: column; }
+  .admin-overview-link-btn { width: 100%; justify-content: center; }
   .admin-announcement-feature h4 { font-size: 1.25rem; }
+  .admin-announcement-list-item {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .admin-announcement-list-item span {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    width: 100%;
+  }
   .admin-overview-recent-card .activity-list { max-height: none; }
   .residents-grid, .vehicles-grid, .visitor-logs-grid { grid-template-columns: 1fr; gap: 1.5rem; }
   .resident-card, .vehicle-card, .visitor-log-card { padding: 1.5rem; }
@@ -1124,6 +1159,10 @@ body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Seg
   .empty-state p { font-size: 0.9375rem; }
   .residents-table {
     min-width: 720px;
+  }
+  .admin-announcement-card,
+  .admin-overview-recent-card {
+    padding: 1rem;
   }
   .residents-table th,
   .residents-table td {

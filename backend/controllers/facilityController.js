@@ -1,4 +1,5 @@
 const FacilityReservation = require('../models/FacilityReservation');
+const FacilityReservationLock = require('../models/FacilityReservationLock');
 const FacilitySetting = require('../models/FacilitySetting');
 const User = require('../models/User');
 const { hasCloudinaryConfig } = require('../utils/cloudinary');
@@ -41,6 +42,51 @@ const DEFAULT_FACILITIES = Object.freeze([
 ]);
 
 const isAdminRole = (role) => ['ADMIN', 'MASTER_ADMIN'].includes(String(role || '').toUpperCase());
+const RESERVATION_LOCK_TTL_MS = 15000;
+const RESERVATION_LOCK_RETRIES = 20;
+const RESERVATION_LOCK_RETRY_DELAY_MS = 120;
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const acquireReservationLock = async (lockKey, owner) => {
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + RESERVATION_LOCK_TTL_MS);
+
+  const existing = await FacilityReservationLock.findOneAndUpdate(
+    {
+      lockKey,
+      $or: [
+        { expiresAt: { $lte: now } },
+        { owner }
+      ]
+    },
+    {
+      $set: {
+        owner,
+        expiresAt
+      }
+    },
+    { new: true }
+  );
+
+  if (existing) {
+    return true;
+  }
+
+  try {
+    await FacilityReservationLock.create({ lockKey, owner, expiresAt });
+    return true;
+  } catch (error) {
+    if (error?.code === 11000) {
+      return false;
+    }
+    throw error;
+  }
+};
+
+const releaseReservationLock = async (lockKey, owner) => {
+  await FacilityReservationLock.deleteOne({ lockKey, owner });
+};
 
 const sanitizeEventTypes = (eventTypes) => {
   const source = Array.isArray(eventTypes) && eventTypes.length > 0
@@ -588,46 +634,71 @@ const createReservation = async (req, res) => {
     const safeDurationHours = Math.max(1, Math.min(12, Number(durationHours) || 1));
     const endDateTime = new Date(reservationDate.getTime() + safeDurationHours * 60 * 60 * 1000);
 
-    const existingReservation = await FacilityReservation.findOne({
-      status: { $in: ['pending', 'approved'] },
-      dateReserved: { $lt: endDateTime },
-      endDateTime: { $gt: reservationDate },
-      $or: [
-        { facilityId: facility._id },
-        { facilityName: facility.name }
-      ]
-    });
+    const lockKey = String(facility._id || facility.name || '').trim().toLowerCase();
+    const lockOwner = `${userId}:${Date.now()}:${Math.random().toString(16).slice(2, 10)}`;
+    let lockAcquired = false;
 
-    if (existingReservation) {
-      return res.status(400).json({ message: `${facility.name} already has a reservation during the selected time.` });
+    for (let attempt = 0; attempt < RESERVATION_LOCK_RETRIES; attempt += 1) {
+      // Retry briefly when another request is currently reserving this same facility.
+      // This keeps the overlap check + insert effectively serialized per facility.
+      // The lock has a TTL, so stale locks are automatically recoverable.
+      lockAcquired = await acquireReservationLock(lockKey, lockOwner);
+      if (lockAcquired) {
+        break;
+      }
+      await wait(RESERVATION_LOCK_RETRY_DELAY_MS);
     }
 
-    const totalAmount = facility.hourlyRate * safeDurationHours;
+    if (!lockAcquired) {
+      return res.status(429).json({
+        message: 'Reservation is being processed for this facility. Please try again in a few seconds.'
+      });
+    }
 
-    const reservation = new FacilityReservation({
-      facilityId: facility._id,
-      facilityName: facility.name,
-      eventType,
-      residentId: userId,
-      residentName: resident.familyName,
-      residentAddress: `${resident.houseAddress}, ${resident.street}`,
-      dateReserved: reservationDate,
-      durationHours: safeDurationHours,
-      endDateTime,
-      purpose,
-      numberOfGuests: numberOfGuests || 0,
-      hourlyRate: facility.hourlyRate,
-      totalAmount,
-      paymentRequired: facility.paymentRequired,
-      paymentMethod: facility.paymentRequired ? 'GCASH' : '',
-      paymentStatus: facility.paymentRequired ? 'none' : 'verified',
-      isPaid: !facility.paymentRequired,
-      expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000)
-    });
+    try {
+      const existingReservation = await FacilityReservation.findOne({
+        status: { $in: ['pending', 'approved'] },
+        dateReserved: { $lt: endDateTime },
+        endDateTime: { $gt: reservationDate },
+        $or: [
+          { facilityId: facility._id },
+          { facilityName: facility.name }
+        ]
+      });
 
-    const savedReservation = await reservation.save();
-    const [enrichedReservation] = attachFacilityMetadata([savedReservation.toObject()], settings);
-    res.status(201).json(enrichedReservation);
+      if (existingReservation) {
+        return res.status(400).json({ message: `${facility.name} already has a reservation during the selected time.` });
+      }
+
+      const totalAmount = facility.hourlyRate * safeDurationHours;
+
+      const reservation = new FacilityReservation({
+        facilityId: facility._id,
+        facilityName: facility.name,
+        eventType,
+        residentId: userId,
+        residentName: resident.familyName,
+        residentAddress: `${resident.houseAddress}, ${resident.street}`,
+        dateReserved: reservationDate,
+        durationHours: safeDurationHours,
+        endDateTime,
+        purpose,
+        numberOfGuests: numberOfGuests || 0,
+        hourlyRate: facility.hourlyRate,
+        totalAmount,
+        paymentRequired: facility.paymentRequired,
+        paymentMethod: facility.paymentRequired ? 'GCASH' : '',
+        paymentStatus: facility.paymentRequired ? 'none' : 'verified',
+        isPaid: !facility.paymentRequired,
+        expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000)
+      });
+
+      const savedReservation = await reservation.save();
+      const [enrichedReservation] = attachFacilityMetadata([savedReservation.toObject()], settings);
+      return res.status(201).json(enrichedReservation);
+    } finally {
+      await releaseReservationLock(lockKey, lockOwner);
+    }
   } catch (error) {
     console.error('Error creating reservation:', error);
     res.status(500).json({ message: 'Error creating reservation', error: error.message });

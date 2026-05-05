@@ -836,7 +836,17 @@ const AdminBillingManagement = ({ token, showConfirm }) => {
             </div>
             <div className="billing-settings-preview">
               {settings?.gcashQr?.path ? (
-                <button type="button" className="billing-qr-open-btn" onClick={() => setViewingQr(true)}>
+                <button
+                  type="button"
+                  className="billing-qr-open-btn"
+                  onClick={() => {
+                    if (!settings?.gcashQr?.path) {
+                      window.alert('No GCash QR code uploaded yet');
+                      return;
+                    }
+                    setViewingQr(true);
+                  }}
+                >
                   <QrCode size={14} />
                   View Current QR
                 </button>

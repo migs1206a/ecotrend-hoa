@@ -249,6 +249,88 @@
   font-weight: 700;
 }
 
+.app-login-redirect-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(16, 185, 129, 0.14), transparent 42%),
+    radial-gradient(circle at 82% 88%, rgba(20, 184, 166, 0.12), transparent 40%),
+    linear-gradient(145deg, #f6fffb, #f0fdf7);
+}
+
+.app-login-redirect-card {
+  width: min(440px, 100%);
+  padding: 2.5rem 2rem;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(22px);
+  box-shadow: 0 24px 72px rgba(16, 36, 28, 0.14);
+  text-align: center;
+  animation: loginRedirectEnter 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.app-login-redirect-ring {
+  width: 6rem;
+  height: 6rem;
+  margin: 0 auto 1.25rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: conic-gradient(from 120deg, rgba(16, 185, 129, 0.2), rgba(20, 184, 166, 0.45), rgba(16, 185, 129, 0.2));
+  animation: loginRedirectSpin 1s linear infinite;
+}
+
+.app-login-redirect-check {
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #10b981, #14b8a6);
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.35);
+}
+
+.app-login-redirect-check svg {
+  width: 2rem;
+  height: 2rem;
+}
+
+.app-login-redirect-title {
+  margin: 0;
+  color: var(--gray-900);
+  font-size: clamp(1.5rem, 3vw, 1.9rem);
+  letter-spacing: -0.03em;
+}
+
+.app-login-redirect-copy {
+  margin: 0.5rem 0 0;
+  color: var(--gray-600);
+  font-size: 0.98rem;
+  font-weight: 600;
+}
+
+@keyframes loginRedirectEnter {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes loginRedirectSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 @media (max-width: 1024px) {
   .auth-layout,
   .auth-layout--compact,
@@ -269,7 +351,8 @@
   }
 
   .auth-brand-card,
-  .app-success-card {
+  .app-success-card,
+  .app-login-redirect-card {
     padding: 1.5rem;
   }
 

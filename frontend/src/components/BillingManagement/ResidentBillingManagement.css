@@ -262,7 +262,7 @@
   align-items: center;
   justify-content: center;
   padding: 1.5rem;
-  z-index: 1000;
+  z-index: 99999;
 }
 
 .resident-billing-modal-card {

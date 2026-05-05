@@ -722,7 +722,17 @@ const AdminFacilityManagement = ({ token }) => {
           </div>
 
           {settings?.gcashQr?.path ? (
-            <button type="button" className="facility-admin-qr-preview-btn" onClick={() => setViewingQr(true)}>
+            <button
+              type="button"
+              className="facility-admin-qr-preview-btn"
+              onClick={() => {
+                if (!settings?.gcashQr?.path) {
+                  window.alert('No facility QR uploaded yet.');
+                  return;
+                }
+                setViewingQr(true);
+              }}
+            >
               <QrCode size={16} />
               View Current QR
             </button>

@@ -244,6 +244,9 @@ body {
 
 .nav-item-label {
   flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Sidebar Footer */
@@ -279,6 +282,7 @@ body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Header */
@@ -370,6 +374,22 @@ body {
 /* Content Area */
 .guard-content {
   padding: 2.5rem;
+}
+
+.module-view-transition {
+  animation: moduleFadeSlide 0.26s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: top center;
+}
+
+@keyframes moduleFadeSlide {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* Page Header */
@@ -658,6 +678,10 @@ body {
   gap: 1rem;
 }
 
+.guard-announcement-header > div {
+  min-width: 0;
+}
+
 .guard-overview-kicker {
   display: inline-flex;
   align-items: center;
@@ -737,6 +761,7 @@ body {
   color: var(--gray-900);
   font-size: 1.45rem;
   line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .guard-announcement-feature p {
@@ -858,6 +883,69 @@ body {
   display: flex;
   gap: 0.75rem;
   margin-bottom: 1.5rem;
+}
+
+.guard-search-toolbar {
+  display: flex;
+  align-items: stretch;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.guard-search-toggle-group {
+  display: flex;
+  background: var(--gray-100);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.guard-search-toggle-group .toggle-btn {
+  min-height: 42px;
+  padding: 0.5rem 1rem;
+  font-size: 0.8125rem;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.guard-search-input-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.guard-search-input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.guard-search-inline-icon {
+  position: absolute;
+  left: 0.875rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--gray-400);
+  pointer-events: none;
+}
+
+.guard-search-input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0.625rem 1rem 0.625rem 2.5rem;
+  font-size: 0.9rem;
+}
+
+.guard-search-btn {
+  min-height: 42px;
+  padding: 0.625rem 1.25rem;
+  border-radius: 12px;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .toggle-btn {
@@ -1753,6 +1841,35 @@ body {
   }
 }
 
+.toggle-btn,
+.toggle-btn-small,
+.search-btn,
+.submit-btn,
+.exit-btn,
+.back-btn,
+.change-resident-btn,
+.form-input,
+.form-textarea-compact,
+.search-input {
+  font-family: inherit;
+}
+
+.toggle-btn,
+.toggle-btn-small,
+.search-btn,
+.submit-btn,
+.exit-btn,
+.back-btn,
+.change-resident-btn {
+  min-height: 42px;
+}
+
+.form-input,
+.search-input,
+.form-textarea-compact {
+  width: 100%;
+}
+
 /* Tablets and iPad (768px - 1024px) */
 @media (max-width: 1024px) {
   .form-row-triple {
@@ -1782,6 +1899,9 @@ body {
 
 /* Mobile Devices - Large (481px - 767px) */
 @media (max-width: 767px) {
+  .guard-dashboard.sidebar-open .guard-main {
+    transform: translateX(2px);
+  }
   /* Sidebar becomes full-screen overlay on mobile */
   .sidebar-backdrop {
     display: block;
@@ -1807,6 +1927,8 @@ body {
     width: 85%;
     max-width: 320px;
     transform: translateX(-100%);
+    pointer-events: none;
+    visibility: hidden;
   }
 
   /* Header adjustments */
@@ -1889,6 +2011,18 @@ body {
     justify-content: center;
   }
 
+  .guard-announcement-list-item {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .guard-announcement-list-item span {
+    width: 100%;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
   .guard-overview-recent-card .activity-list {
     padding-right: 0;
   }
@@ -1927,12 +2061,27 @@ body {
   }
 
   /* Search input group stacks */
-  .search-input-group {
+  .search-input-group,
+  .search-type-toggle,
+  .guard-search-toolbar,
+  .guard-search-input-row {
     flex-direction: column;
+    align-items: stretch;
   }
 
-  .search-type-toggle {
-    flex-direction: column;
+  .guard-search-toggle-group {
+    width: 100%;
+  }
+
+  .guard-search-toggle-group .toggle-btn {
+    flex: 1 1 0;
+    justify-content: center;
+    min-width: 0;
+  }
+
+  .guard-search-btn {
+    width: 100%;
+    justify-content: center;
   }
 
   /* Resident dropdown */
@@ -1978,6 +2127,17 @@ body {
   .search-section,
   .form-container-compact {
     padding: 1.25rem;
+  }
+
+  .guard-search-toggle-group .toggle-btn {
+    font-size: 0.78rem;
+    padding: 0.48rem 0.65rem;
+    gap: 0.25rem;
+  }
+
+  .guard-announcement-card,
+  .guard-overview-recent-card {
+    padding: 1rem;
   }
 
   .card-header h3 {

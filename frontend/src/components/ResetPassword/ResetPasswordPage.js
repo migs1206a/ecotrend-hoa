@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import './ResetPassword.css';
 import ecohoa from '../../assets/ecohoa.png';
 import { Eye, EyeOff, CheckCircle, XCircle } from 'lucide-react';
@@ -16,16 +16,7 @@ const ResetPasswordPage = ({ token, onNavigateToLogin }) => {
   const [success, setSuccess] = useState(false);
   const [validToken, setValidToken] = useState(null);
 
-  useEffect(() => {
-    if (token) {
-      verifyToken();
-    } else {
-      setValidToken(false);
-      setError('No reset token provided');
-    }
-  }, [token]);
-
-  const verifyToken = async () => {
+  const verifyToken = useCallback(async () => {
     try {
       const response = await fetch(apiUrl(`/auth/verify-reset-token/${token}`));
       const data = await response.json();
@@ -40,7 +31,16 @@ const ResetPasswordPage = ({ token, onNavigateToLogin }) => {
       setValidToken(false);
       setError('Connection error. Please try again later.');
     }
-  };
+  }, [token]);
+
+  useEffect(() => {
+    if (token) {
+      verifyToken();
+    } else {
+      setValidToken(false);
+      setError('No reset token provided');
+    }
+  }, [token, verifyToken]);
 
   const validatePassword = (password) => {
     if (password.length < 8) {
@@ -55,7 +55,7 @@ const ResetPasswordPage = ({ token, onNavigateToLogin }) => {
     if (!/[0-9]/.test(password)) {
       return 'Password must contain at least one number';
     }
-    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+    if (!/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password)) {
       return 'Password must contain at least one special character';
     }
     return null;

@@ -282,7 +282,17 @@ const ResidentFacilityReservation = ({ token }) => {
             <p>Use this QR code when paying for any facility that has a reservation fee.</p>
           </div>
           {settings?.gcashQr?.path ? (
-            <button type="button" className="facility-qr-view-btn" onClick={() => setViewingQr(true)}>
+            <button
+              type="button"
+              className="facility-qr-view-btn"
+              onClick={() => {
+                if (!settings?.gcashQr?.path) {
+                  window.alert('Admin has not uploaded a GCash QR code yet.');
+                  return;
+                }
+                setViewingQr(true);
+              }}
+            >
               <QrCode size={16} />
               View GCash QR
             </button>

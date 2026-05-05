@@ -29,6 +29,7 @@ const {
 } = require('../utils/uploadLimits');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1h';
 
 const normalizePlateNumber = (value) => {
   const normalized = String(value || '').trim().toUpperCase();
@@ -351,7 +352,7 @@ exports.login = async (req, res) => {
     const token = jwt.sign(
       tokenPayload,
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: JWT_EXPIRES_IN }
     );
 
     const userPayload = {

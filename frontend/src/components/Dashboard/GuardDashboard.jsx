@@ -30,7 +30,6 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const [loading, setLoading] = useState(false);
   
   const [residents, setResidents] = useState([]);
-  const [selectedResident, setSelectedResident] = useState(null);
   const [residentSearchQuery, setResidentSearchQuery] = useState('');
   const [showResidentDropdown, setShowResidentDropdown] = useState(false);
   const [residentDropdownType, setResidentDropdownType] = useState('');
@@ -146,14 +145,14 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const menuItems = useMemo(
     () => ([
       { id: 'overview',       icon: Home,       label: 'Overview' },
-      { id: 'search',         icon: Search,     label: 'Search Resident/Vehicle' },
+      { id: 'search',         icon: Search,     label: 'Search Records' },
       { id: 'entry-log',      icon: LogIn,      label: 'Log Entry' },
       { id: 'exit-log',       icon: LogOutIcon, label: 'Log Exit' },
       { id: 'pre-registered', icon: Calendar,   label: 'Pre-Registered Visitors' },
       { id: 'facilities',     icon: Landmark,   label: 'Facility Reservations' },
       { id: 'announcements',  icon: Bell,       label: 'Announcements' },
       { id: 'cctv',           icon: Camera,     label: 'CCTV Feeds' },
-      { id: 'subdivision_map', icon: MapIcon,   label: '3D Mapped Subdivision' },
+      { id: 'subdivision_map', icon: MapIcon,   label: '3D Subdivision Map' },
       { id: 'activity',       icon: Clock,      label: 'Gate Activity Log' }
     ].filter((item) => hasModuleAccess(permissionUser, item.id))),
     [permissionUser]
@@ -311,7 +310,6 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
   };
 
   const handleSelectResident = (resident, fieldPrefix) => {
-    setSelectedResident(resident);
     if      (fieldPrefix === 'host')     setEntryForm({ ...entryForm, hostResidentId: resident._id, hostResidentName: resident.familyName, hostResidentAddress: `${resident.houseAddress}, ${resident.street}` });
     else if (fieldPrefix === 'delivery') setEntryForm({ ...entryForm, deliveryResidentId: resident._id, deliveryResidentName: resident.familyName, deliveryResidentAddress: `${resident.houseAddress}, ${resident.street}` });
     else if (fieldPrefix === 'resident') setEntryForm({ ...entryForm, residentId: resident._id, residentName: resident.familyName, residentAddress: `${resident.houseAddress}, ${resident.street}` });
@@ -391,7 +389,6 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
 
       showAlert(`${visitorType === 'visitor' ? 'Visitor' : visitorType === 'delivery' ? 'Delivery' : 'Resident'} entry logged successfully!`, 'success');
       setEntryForm({ visitorType: 'visitor', visitorLastName: '', visitorFirstName: '', visitorMiddleName: '', visitorContact: '+63', purposeOfVisit: '', hostResidentId: '', hostResidentName: '', hostResidentAddress: '', deliveryLastName: '', deliveryFirstName: '', deliveryMiddleName: '', deliveryContact: '+63', deliveryResidentId: '', deliveryResidentName: '', deliveryResidentAddress: '', residentId: '', residentName: '', residentAddress: '', plateNumber: '', vehicleType: '', vehicleColor: '', notes: '' });
-      setSelectedResident(null);
       fetchStats(); fetchRecentActivity();
     } catch (error) { console.error('Entry log error:', error); showAlert('Failed to log entry', 'error'); }
     setLoading(false);
@@ -712,43 +709,41 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
           <div className="page-header"><div className="page-title"><h2>Search Resident/Vehicle</h2><p>Search for residents or vehicles in the system</p></div></div>
           <div className="search-section">
             <div className="search-controls">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-                {/* Type Toggle — compact pill */}
-                <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: '10px', padding: '3px', gap: '2px', flexShrink: 0 }}>
+              <div className="guard-search-toolbar">
+                <div className="guard-search-toggle-group">
                   <button
                     className={searchType === 'resident' ? 'toggle-btn active' : 'toggle-btn'}
                     onClick={() => { setSearchType('resident'); setSearchQuery(''); setSearchResults([]); }}
-                    style={{ padding: '0.5rem 1rem', fontSize: '0.8125rem', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.375rem', whiteSpace: 'nowrap' }}
+                    type="button"
                   >
                     <User size={14} />Resident
                   </button>
                   <button
                     className={searchType === 'vehicle' ? 'toggle-btn active' : 'toggle-btn'}
                     onClick={() => { setSearchType('vehicle'); setSearchQuery(''); setSearchResults([]); }}
-                    style={{ padding: '0.5rem 1rem', fontSize: '0.8125rem', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.375rem', whiteSpace: 'nowrap' }}
+                    type="button"
                   >
                     <Car size={14} />Vehicle
                   </button>
                 </div>
 
-                {/* Search bar + button inline */}
-                <div style={{ display: 'flex', flex: 1, gap: '0.5rem', alignItems: 'center' }}>
-                  <div style={{ position: 'relative', flex: 1 }}>
-                    <Search size={16} style={{ position: 'absolute', left: '0.875rem', top: '50%', transform: 'translateY(-50%)', color: '#9ca3af', pointerEvents: 'none' }} />
+                <div className="guard-search-input-row">
+                  <div className="guard-search-input-wrap">
+                    <Search size={16} className="guard-search-inline-icon" />
                     <input
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       placeholder={searchType === 'resident' ? 'Name or address...' : 'Plate number...'}
-                      className="search-input"
-                      style={{ paddingLeft: '2.5rem', paddingTop: '0.625rem', paddingBottom: '0.625rem', fontSize: '0.9rem' }}
+                      className="search-input guard-search-input"
                       onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
                     />
                   </div>
                   <button
                     onClick={handleSearch}
                     disabled={loading}
-                    style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', padding: '0.625rem 1.25rem', background: 'linear-gradient(135deg, #10b981, #14b8a6)', color: '#fff', border: 'none', borderRadius: '12px', fontSize: '0.875rem', fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', opacity: loading ? 0.7 : 1, boxShadow: '0 4px 12px rgba(16,185,129,0.3)', flexShrink: 0, fontFamily: 'inherit' }}
+                    className="search-btn guard-search-btn"
+                    type="button"
                   >
                     <Search size={15} />{loading ? 'Searching...' : 'Search'}
                   </button>
@@ -1132,7 +1127,8 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
 
   // ── Render ───────────────────────────────────────────────────────
   return (
-    <div className="guard-dashboard">
+    <div className={`guard-dashboard ${sidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
+      <div className={`sidebar-backdrop ${sidebarOpen ? 'active' : ''}`} onClick={() => setSidebarOpen(false)} />
       <aside className={`guard-sidebar ${sidebarOpen ? 'open' : 'closed'}`}>
         <div className="sidebar-header">
           {sidebarOpen && (
@@ -1151,7 +1147,16 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
             const Icon = item.icon;
             const isActive = activeModule === item.id;
             return (
-              <button key={item.id} onClick={() => setActiveModule(item.id)} className={`nav-item ${isActive ? 'active' : ''}`}>
+              <button
+                key={item.id}
+                onClick={() => {
+                  setActiveModule(item.id);
+                  if (window.innerWidth <= 767) {
+                    setSidebarOpen(false);
+                  }
+                }}
+                className={`nav-item ${isActive ? 'active' : ''}`}
+              >
                 <Icon size={20} />
                 {sidebarOpen && <><span className="nav-item-label">{item.label}</span>{isActive && <ChevronRight size={16} />}</>}
               </button>
@@ -1179,7 +1184,11 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
             </div>
           </div>
         </header>
-        <div className="guard-content">{renderContent()}</div>
+        <div className="guard-content">
+          <div key={activeModule} className="module-view-transition">
+            {renderContent()}
+          </div>
+        </div>
       </main>
     </div>
   );

@@ -240,7 +240,17 @@ const ResidentBillingManagement = ({ token, userId, showAlert }) => {
           <p>Scan this QR code when paying, then upload your receipt under the corresponding month.</p>
         </div>
         {settings?.gcashQr?.path ? (
-          <button type="button" className="resident-billing-qr-open-btn" onClick={() => setViewingQr(true)}>
+          <button
+            type="button"
+            className="resident-billing-qr-open-btn"
+            onClick={() => {
+              if (!settings?.gcashQr?.path) {
+                window.alert('Admin has not uploaded the GCash QR code yet.');
+                return;
+              }
+              setViewingQr(true);
+            }}
+          >
             <QrCode size={14} />
             View GCash QR
           </button>
