@@ -54,6 +54,26 @@ const ACCOUNT_SORT_OPTIONS = [
   { value: 'username_asc', label: 'Username A-Z' },
   { value: 'username_desc', label: 'Username Z-A' }
 ];
+const DIRECTORY_ROLE_VIEWS = [
+  {
+    role: 'ADMIN',
+    label: 'Admin Accounts',
+    shortLabel: 'Admin',
+    description: 'Officer and board member usernames, passwords, and module access.'
+  },
+  {
+    role: 'GUARD',
+    label: 'Guard Accounts',
+    shortLabel: 'Guard',
+    description: 'Security team credentials and guard portal access.'
+  },
+  {
+    role: 'RESIDENT',
+    label: 'Resident Accounts',
+    shortLabel: 'Resident',
+    description: 'Registered homeowner portal accounts, approvals, and credential management.'
+  }
+];
 
 const buildCreateForm = (accountType = 'ADMIN', position = OFFICER_POSITIONS.VICE_PRESIDENT) => ({
   username: '',
@@ -113,6 +133,69 @@ const getAccountTypeLabel = (role = '') => {
 
   return 'Account';
 };
+
+const getDirectoryView = (role = '') =>
+  DIRECTORY_ROLE_VIEWS.find((view) => view.role === role) || null;
+
+const getDirectoryTitle = (role = 'ALL', scope = ACTIVE_SCOPE) => {
+  const view = getDirectoryView(role);
+
+  if (view) {
+    return scope === DELETED_SCOPE ? `Recently Deleted ${view.label}` : view.label;
+  }
+
+  return scope === DELETED_SCOPE ? 'Recently Deleted Accounts' : 'Account Directory';
+};
+
+const getDirectorySubtitle = (role = 'ALL', scope = ACTIVE_SCOPE) => {
+  if (scope === DELETED_SCOPE) {
+    if (role === 'ADMIN') {
+      return 'Restore recently deleted officer and board member accounts before they are purged automatically.';
+    }
+
+    if (role === 'GUARD') {
+      return 'Restore recently deleted guard accounts before they are purged automatically.';
+    }
+
+    if (role === 'RESIDENT') {
+      return 'Restore recently deleted resident portal accounts before they are purged automatically.';
+    }
+
+    return 'Restore recently deleted officer, guard, and resident accounts before they are purged automatically.';
+  }
+
+  if (role === 'ADMIN') {
+    return 'Review officer assignments, board member access, usernames, passwords, and module permissions.';
+  }
+
+  if (role === 'GUARD') {
+    return 'Review security team accounts, reset passwords, and update guard-side module access.';
+  }
+
+  if (role === 'RESIDENT') {
+    return 'Manage resident usernames, approvals, password resets, and portal access from one labeled directory.';
+  }
+
+  return 'Review, edit, reset passwords, and move accounts to recently deleted.';
+};
+
+const getDirectoryCount = (role = '', summary = ACCOUNT_SUMMARY_DEFAULT) => {
+  if (role === 'ADMIN') {
+    return Number(summary.officers) || 0;
+  }
+
+  if (role === 'GUARD') {
+    return Number(summary.guards) || 0;
+  }
+
+  if (role === 'RESIDENT') {
+    return Number(summary.residents) || 0;
+  }
+
+  return Number(summary.total) || 0;
+};
+
+const getDirectoryViewIcon = (role = '') => (role === 'ADMIN' ? Shield : Users);
 
 const getAssignedRoleLabel = (account = {}) => {
   if (account.role === 'ADMIN') {
@@ -632,6 +715,8 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
   const guardCount = Number(accountSummary.guards) || 0;
   const residentCount = Number(accountSummary.residents) || 0;
   const boardMemberCount = Number(accountSummary.boardMembers) || 0;
+  const directoryTitle = getDirectoryTitle(filterRole, accountScope);
+  const directorySubtitle = getDirectorySubtitle(filterRole, accountScope);
 
   const formatDate = (value) => value ? new Date(value).toLocaleDateString('en-PH', {
     year: 'numeric',
@@ -668,8 +753,11 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
     resetCreateForm(nextType);
   };
 
-  const openAccountsPanel = (targetScope = ACTIVE_SCOPE) => {
+  const openAccountsPanel = (targetScope = ACTIVE_SCOPE, targetRole = filterRole) => {
     setActivePanel('accounts');
+    if (targetRole) {
+      setFilterRole(targetRole);
+    }
     if (page !== 1) {
       setPage(1);
     }
@@ -733,7 +821,7 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
           <div>
             <h1 className="ma-page-title">Manage Accounts</h1>
             <p className="ma-page-sub">
-              Create officer and guard accounts, lock role-based module defaults, and manage resident accounts through the directory.
+              Create officer and guard accounts, then jump straight into labeled admin, guard, and resident directories for account management.
             </p>
           </div>
           <div className="ma-view-switch">
@@ -743,16 +831,22 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
               onClick={() => setActivePanel('create')}
             >
               <UserPlus size={16} />
-              Create Account
+              Create Accounts
             </button>
-            <button
-              type="button"
-              className={`ma-view-btn ${activePanel === 'accounts' ? 'active' : ''}`}
-              onClick={() => openAccountsPanel(accountScope)}
-            >
-              <Users size={16} />
-              Accounts
-            </button>
+            {DIRECTORY_ROLE_VIEWS.map((view) => {
+              const ViewIcon = getDirectoryViewIcon(view.role);
+              return (
+                <button
+                  key={view.role}
+                  type="button"
+                  className={`ma-view-btn ${activePanel === 'accounts' && filterRole === view.role ? 'active' : ''}`}
+                  onClick={() => openAccountsPanel(ACTIVE_SCOPE, view.role)}
+                >
+                  <ViewIcon size={16} />
+                  {view.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -893,10 +987,48 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
                     {createLoading ? <span className="ma-spinner" /> : <UserPlus size={18} />}
                     {createLoading ? 'Creating Account...' : `Create ${accountType === 'ADMIN' ? 'Officer' : 'Guard'} Account`}
                   </button>
-                  <button type="button" className="ma-directory-link" onClick={() => openAccountsPanel(ACTIVE_SCOPE)}>
+                  <button
+                    type="button"
+                    className="ma-directory-link"
+                    onClick={() => openAccountsPanel(ACTIVE_SCOPE, accountType)}
+                  >
                     <Users size={16} />
-                    Open Accounts Directory
+                    View {accountType === 'ADMIN' ? 'Admin' : 'Guard'} Accounts
                   </button>
+                </div>
+
+                <div className="ma-directory-guide">
+                  <div className="ma-directory-guide-copy">
+                    <h3>Resident accounts are managed here too</h3>
+                    <p>
+                      Resident accounts still come from resident registration, but you can open the labeled
+                      directories below to review approvals, edit usernames, reset passwords, or remove accounts.
+                    </p>
+                  </div>
+                  <div className="ma-directory-guide-grid">
+                    {DIRECTORY_ROLE_VIEWS.map((view) => {
+                      const ViewIcon = getDirectoryViewIcon(view.role);
+                      const count = getDirectoryCount(view.role, accountSummary);
+                      const countLabel = Number(accountSummary.total) > 0 ? `${count} active` : 'Open directory';
+                      return (
+                        <button
+                          key={view.role}
+                          type="button"
+                          className={`ma-directory-card ${activePanel === 'accounts' && filterRole === view.role ? 'active' : ''}`}
+                          onClick={() => openAccountsPanel(ACTIVE_SCOPE, view.role)}
+                        >
+                          <span className="ma-directory-card-icon">
+                            <ViewIcon size={18} />
+                          </span>
+                          <div className="ma-directory-card-copy">
+                            <strong>{view.label}</strong>
+                            <span>{countLabel}</span>
+                            <small>{view.description}</small>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>
@@ -908,17 +1040,13 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
             <div className="ma-page-header ma-page-header--compact">
               <div>
                 <h2 className="ma-page-title ma-page-title--small">
-                  {accountScope === DELETED_SCOPE ? 'Recently Deleted Accounts' : 'Account Directory'}
+                  {directoryTitle}
                 </h2>
-                <p className="ma-page-sub">
-                  {accountScope === DELETED_SCOPE
-                    ? 'Restore recently deleted officer, guard, and resident accounts before they are purged automatically.'
-                    : 'Review, edit, reset passwords, and move accounts to recently deleted.'}
-                </p>
+                <p className="ma-page-sub">{directorySubtitle}</p>
               </div>
               <button type="button" className="ma-directory-link" onClick={() => setActivePanel('create')}>
                 <UserPlus size={16} />
-                Create Account
+                Create Accounts
               </button>
             </div>
 

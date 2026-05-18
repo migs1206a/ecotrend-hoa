@@ -27,6 +27,15 @@ router.get(
   entryLogController.getResidentsInside
 );
 
+router.get(
+  '/export/pdf',
+  requireAccess({
+    roles: ['GUARD'],
+    modules: ['visitors', 'overview', 'activity']
+  }),
+  entryLogController.downloadEntryLogsPdf
+);
+
 // Get logs by guard
 router.get(
   '/guard/:guardId',

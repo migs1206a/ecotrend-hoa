@@ -4,6 +4,40 @@
   gap: 1.5rem;
 }
 
+.admin-audit-page-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.admin-audit-export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.85rem 1.1rem;
+  border: none;
+  border-radius: 0.95rem;
+  background: linear-gradient(135deg, #0f766e 0%, #0ea5a4 100%);
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 12px 24px rgba(13, 148, 136, 0.18);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.admin-audit-export-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 28px rgba(13, 148, 136, 0.24);
+}
+
+.admin-audit-export-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
 .admin-audit-storage,
 .admin-audit-archives-card {
   background: #ffffff;
@@ -346,6 +380,15 @@
 }
 
 @media (max-width: 900px) {
+  .admin-audit-page-actions {
+    width: 100%;
+  }
+
+  .admin-audit-export-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
   .admin-audit-filters {
     grid-template-columns: 1fr;
   }

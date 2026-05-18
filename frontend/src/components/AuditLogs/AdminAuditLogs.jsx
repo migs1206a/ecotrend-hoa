@@ -76,6 +76,7 @@ const AdminAuditLogs = ({ token, showAlert }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [moduleFilter, setModuleFilter] = useState('');
   const [eventTypeFilter, setEventTypeFilter] = useState('');
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [archiveWindowDays, setArchiveWindowDays] = useState(30);
   const [archiveLoading, setArchiveLoading] = useState(false);
   const [archiveMeta, setArchiveMeta] = useState({
@@ -238,6 +239,55 @@ const AdminAuditLogs = ({ token, showAlert }) => {
     }
   };
 
+  const handleDownloadPdf = async () => {
+    setDownloadingPdf(true);
+
+    try {
+      const params = new URLSearchParams();
+      const trimmedQuery = searchQuery.trim();
+
+      if (trimmedQuery) {
+        params.set('q', trimmedQuery);
+      }
+
+      if (moduleFilter) {
+        params.set('module', moduleFilter);
+      }
+
+      if (eventTypeFilter) {
+        params.set('eventType', eventTypeFilter);
+      }
+
+      const queryString = params.toString();
+      const response = await fetch(
+        apiUrl(`${API}/export/pdf${queryString ? `?${queryString}` : ''}`),
+        { headers: headers() }
+      );
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.message || 'Failed to download audit log PDF');
+      }
+
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get('content-disposition') || '';
+      const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+      const filename = filenameMatch?.[1] || 'admin-audit-logs.pdf';
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (error) {
+      showAlert && showAlert(error.message || 'Failed to download audit log PDF', 'error');
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
+
   const summary = useMemo(() => {
     const accessCount = logs.filter((log) => log.eventType === 'access').length;
     const actionCount = logs.filter((log) => log.eventType !== 'access').length;
@@ -256,6 +306,17 @@ const AdminAuditLogs = ({ token, showAlert }) => {
         <div className="page-title">
           <h2>Audit Logs</h2>
           <p>Review which admin modules were opened and which admin-side actions were completed across the system.</p>
+        </div>
+        <div className="admin-audit-page-actions">
+          <button
+            type="button"
+            className="admin-audit-export-btn"
+            onClick={handleDownloadPdf}
+            disabled={downloadingPdf}
+          >
+            <Download size={16} />
+            {downloadingPdf ? 'Preparing PDF...' : 'Download PDF'}
+          </button>
         </div>
       </div>
 

@@ -2,6 +2,174 @@
 const EntryLog = require('../models/EntryLog');
 const { parsePagination, sendPaginatedResponse, paginateArray } = require('../utils/pagination');
 const { validateNameField } = require('../utils/fieldValidation');
+const { buildBrandedReportPdf } = require('../utils/brandedPdf');
+
+const escapeRegex = (value = '') => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const buildEntryLogFilter = (queryParams = {}, baseFilter = {}) => {
+  const { startDate, endDate, guardId, q } = queryParams;
+  const filter = { ...baseFilter };
+
+  if (startDate && endDate && !filter.timestamp) {
+    filter.timestamp = {
+      $gte: new Date(startDate),
+      $lte: new Date(endDate)
+    };
+  }
+
+  if (guardId && !filter.guardOnDuty) {
+    filter.guardOnDuty = guardId;
+  }
+
+  const searchQuery = String(q || '').trim();
+  if (searchQuery) {
+    const searchRegex = new RegExp(escapeRegex(searchQuery), 'i');
+    filter.$or = [
+      { plateNumber: searchRegex },
+      { logType: searchRegex },
+      { vehicleOwnerType: searchRegex },
+      { ownerName: searchRegex },
+      { residentName: searchRegex },
+      { residentAddress: searchRegex },
+      { vehicleType: searchRegex },
+      { vehicleColor: searchRegex },
+      { notes: searchRegex },
+      { recordedByName: searchRegex },
+      { recordedByRole: searchRegex }
+    ];
+  }
+
+  return filter;
+};
+
+const formatDateTime = (value) => {
+  if (!value) {
+    return '';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return date.toLocaleString('en-PH', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+};
+
+const formatDateForFileName = (value = new Date()) => {
+  const date = new Date(value);
+  const pad = (part) => String(part).padStart(2, '0');
+
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds())
+  ].join('');
+};
+
+const toTitleCase = (value = '') => {
+  const normalized = String(value || '').trim().toLowerCase();
+
+  if (!normalized) {
+    return '';
+  }
+
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+};
+
+const getRecordedByLabel = (log = {}) =>
+  String(
+    log.recordedByName
+      || log.guardOnDuty?.fullName
+      || log.guardOnDuty?.username
+      || log.recordedByRole
+      || 'Guard'
+  ).trim() || 'Guard';
+
+const buildEntryLogPdfScope = (queryParams = {}) => {
+  const parts = ['Gate activity records'];
+  const search = String(queryParams.q || '').trim();
+  const startDate = String(queryParams.startDate || '').trim();
+  const endDate = String(queryParams.endDate || '').trim();
+
+  if (startDate && endDate) {
+    parts.push(`from ${startDate} to ${endDate}`);
+  }
+
+  if (search) {
+    parts.push(`matching "${search}"`);
+  }
+
+  return `${parts.join(', ')}.`;
+};
+
+const buildEntryLogPdfRows = (logs = []) =>
+  logs.map((log) => ({
+    recordedAt: formatDateTime(log.timestamp),
+    plateNumber: log.plateNumber === 'NO-VEHICLE' ? 'No vehicle' : log.plateNumber || 'No vehicle',
+    logType: log.logType === 'entry' ? 'Entry' : 'Exit',
+    ownerType: toTitleCase(log.vehicleOwnerType || 'resident'),
+    ownerName: log.ownerName || '-',
+    resident: log.residentName
+      ? [log.residentName, log.residentAddress].filter(Boolean).join(' / ')
+      : '-',
+    recordedBy: getRecordedByLabel(log),
+    notes: log.notes || '-'
+  }));
+
+const buildEntryLogPdf = (logs = [], generatedBy = 'Guard', queryParams = {}) => {
+  const rows = buildEntryLogPdfRows(logs);
+  const entryCount = logs.filter((log) => log.logType === 'entry').length;
+  const exitCount = logs.length - entryCount;
+  const residentCount = logs.filter((log) => log.vehicleOwnerType === 'resident').length;
+  const visitorCount = logs.filter((log) => log.vehicleOwnerType === 'visitor').length;
+  const deliveryCount = logs.filter((log) => log.vehicleOwnerType === 'delivery').length;
+  const generatedOn = new Date();
+  const filename = `gate-activity-log-${formatDateForFileName(generatedOn)}.pdf`;
+
+  const pdfContent = buildBrandedReportPdf({
+    title: 'Gate Activity Log Report',
+    generatedOn,
+    generatedBy,
+    filename,
+    scope: buildEntryLogPdfScope(queryParams),
+    columns: [
+      { key: 'recordedAt', label: 'Date & Time', width: 94 },
+      { key: 'plateNumber', label: 'Plate Number', width: 82 },
+      { key: 'logType', label: 'Type', width: 50, align: 'center' },
+      { key: 'ownerType', label: 'Owner Type', width: 64, align: 'center' },
+      { key: 'ownerName', label: 'Owner / Driver', width: 92 },
+      { key: 'resident', label: 'Resident / Address', width: 148 },
+      { key: 'recordedBy', label: 'Recorded By', width: 92 },
+      { key: 'notes', label: 'Notes', width: 120 }
+    ],
+    rows,
+    summaryItems: [
+      { label: 'Total Logs', value: String(rows.length) },
+      { label: 'Entries', value: String(entryCount) },
+      { label: 'Exits', value: String(exitCount) },
+      { label: 'Resident Logs', value: String(residentCount) },
+      { label: 'Visitor Logs', value: String(visitorCount) },
+      { label: 'Delivery Logs', value: String(deliveryCount) }
+    ],
+    emptyMessage: 'No gate activity records match the selected filters.',
+    pageSize: 'a4',
+    orientation: 'landscape'
+  });
+
+  return {
+    filename,
+    pdfBuffer: Buffer.from(pdfContent, 'binary')
+  };
+};
 
 const normalizePlateNumber = (value) => {
   const normalized = String(value || '').trim().toUpperCase();
@@ -97,21 +265,7 @@ exports.createEntryLog = async (req, res) => {
 // @access  Guard/Admin only
 exports.getAllEntryLogs = async (req, res) => {
   try {
-    const { startDate, endDate, guardId } = req.query;
-    
-    let query = {};
-    
-    if (startDate && endDate) {
-      query.timestamp = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate)
-      };
-    }
-    
-    if (guardId) {
-      query.guardOnDuty = guardId;
-    }
-
+    const query = buildEntryLogFilter(req.query);
     const pagination = parsePagination(req.query);
     const baseQuery = EntryLog.find(query)
       .populate('guardOnDuty', 'username fullName')
@@ -133,6 +287,26 @@ exports.getAllEntryLogs = async (req, res) => {
   }
 };
 
+exports.downloadEntryLogsPdf = async (req, res) => {
+  try {
+    const filter = buildEntryLogFilter(req.query);
+    const logs = await EntryLog.find(filter)
+      .populate('guardOnDuty', 'username fullName')
+      .populate('residentId', 'familyName houseAddress street phoneNumber')
+      .sort({ timestamp: -1 })
+      .lean();
+    const generatedBy = String(req.user?.fullName || req.user?.username || req.user?.role || 'Guard').trim() || 'Guard';
+    const { filename, pdfBuffer } = buildEntryLogPdf(logs, generatedBy, req.query);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=\"${filename}\"`);
+    return res.send(pdfBuffer);
+  } catch (error) {
+    console.error('downloadEntryLogsPdf error:', error);
+    return res.status(500).json({ message: 'Failed to download gate activity PDF' });
+  }
+};
+
 // @desc    Get today's entry logs
 // @route   GET /api/entry-logs/today
 // @access  Guard/Admin only
@@ -144,12 +318,12 @@ exports.getTodayEntryLogs = async (req, res) => {
     const endOfDay = new Date();
     endOfDay.setHours(23, 59, 59, 999);
 
-    const filter = {
+    const filter = buildEntryLogFilter(req.query, {
       timestamp: {
         $gte: startOfDay,
         $lte: endOfDay
       }
-    };
+    });
     const pagination = parsePagination(req.query);
     const query = EntryLog.find(filter)
       .populate('guardOnDuty', 'username fullName')
@@ -255,7 +429,7 @@ exports.getTodayStats = async (req, res) => {
 // @access  Guard/Admin only
 exports.getLogsByGuard = async (req, res) => {
   try {
-    const filter = { guardOnDuty: req.params.guardId };
+    const filter = buildEntryLogFilter(req.query, { guardOnDuty: req.params.guardId });
     const pagination = parsePagination(req.query);
     const query = EntryLog.find(filter)
       .populate('residentId', 'familyName houseAddress street phoneNumber')

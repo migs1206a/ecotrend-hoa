@@ -3,6 +3,7 @@ const path = require('path');
 const AdminAuditLog = require('../models/AdminAuditLog');
 const AdminAuditLogArchive = require('../models/AdminAuditLogArchive');
 const { parsePagination, sendPaginatedResponse } = require('../utils/pagination');
+const { buildBrandedReportPdf } = require('../utils/brandedPdf');
 const {
   createAdminAuditLog,
   getAuditLogRetentionDays,
@@ -26,6 +27,161 @@ const ensureArchiveDirectory = () => {
 const buildArchiveFileName = () => {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   return `admin-audit-logs-${stamp}.json`;
+};
+
+const formatDateTime = (value) => {
+  if (!value) {
+    return '';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return date.toLocaleString('en-PH', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+};
+
+const formatDateForFileName = (value = new Date()) => {
+  const date = new Date(value);
+  const pad = (part) => String(part).padStart(2, '0');
+
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds())
+  ].join('');
+};
+
+const getStatusLabel = (statusCode) => {
+  const code = Number(statusCode) || 0;
+
+  if (code === 200) return 'OK';
+  if (code === 201) return 'Created';
+  if (code === 202) return 'Accepted';
+  if (code === 204) return 'No Content';
+  if (code >= 400 && code < 500) return 'Client Error';
+  if (code >= 500) return 'Server Error';
+
+  return 'Success';
+};
+
+const getActorDisplayName = (actor = {}) =>
+  String(actor.firstName || actor.fullName || actor.username || 'Officer').trim() || 'Officer';
+
+const getActorRoleLabel = (actor = {}) =>
+  String(actor.position || actor.role || actor.accountType || 'Officer').trim() || 'Officer';
+
+const buildRequestSummary = (log = {}) => {
+  const method = String(log.method || '').trim().toUpperCase();
+  const endpoint = String(log.endpoint || '').trim();
+  const code = Number(log.statusCode) || 0;
+  const statusLabel = getStatusLabel(code);
+
+  if (method && endpoint) {
+    return `${method} ${endpoint} (${code || '-'} ${statusLabel})`;
+  }
+
+  if (endpoint) {
+    return `${endpoint} (${code || '-'} ${statusLabel})`;
+  }
+
+  return `${code || '-'} ${statusLabel}`;
+};
+
+const buildAdminAuditPdfScope = (query = {}) => {
+  const parts = ['Admin audit log records'];
+  const moduleKey = String(query.module || '').trim();
+  const eventType = String(query.eventType || '').trim().toLowerCase();
+  const search = String(query.q || '').trim();
+
+  if (moduleKey) {
+    parts.push(`filtered to ${getAuditModuleLabel(moduleKey)}`);
+  }
+
+  if (eventType === 'access') {
+    parts.push('showing module access events only');
+  } else if (eventType === 'action') {
+    parts.push('showing system action events only');
+  }
+
+  if (search) {
+    parts.push(`matching "${search}"`);
+  }
+
+  return `${parts.join(', ')}.`;
+};
+
+const buildAdminAuditPdfRows = (logs = []) =>
+  logs.map((log) => ({
+    recordedAt: formatDateTime(log.createdAt),
+    actor: getActorDisplayName(log.actor),
+    role: getActorRoleLabel(log.actor),
+    module: log.moduleLabel || log.moduleKey || 'Module',
+    eventType: log.eventType === 'access' ? 'Access' : 'Action',
+    action: log.action || '-',
+    request: buildRequestSummary(log),
+    details: log.description || '-'
+  }));
+
+const buildAdminAuditPdf = (logs = [], generatedBy = 'Officer', query = {}) => {
+  const rows = buildAdminAuditPdfRows(logs);
+  const accessCount = logs.filter((log) => log.eventType === 'access').length;
+  const actionCount = logs.length - accessCount;
+  const moduleKey = String(query.module || '').trim();
+  const eventType = String(query.eventType || '').trim().toLowerCase();
+  const moduleFilterLabel = moduleKey ? getAuditModuleLabel(moduleKey) : 'All Modules';
+  const eventFilterLabel = eventType === 'access'
+    ? 'Module Access'
+    : eventType === 'action'
+      ? 'System Actions'
+      : 'All Activity';
+  const generatedOn = new Date();
+  const filename = `admin-audit-logs-${formatDateForFileName(generatedOn)}.pdf`;
+
+  const pdfContent = buildBrandedReportPdf({
+    title: 'Admin Audit Logs Report',
+    generatedOn,
+    generatedBy,
+    filename,
+    scope: buildAdminAuditPdfScope(query),
+    columns: [
+      { key: 'recordedAt', label: 'Date & Time', width: 92 },
+      { key: 'actor', label: 'Admin', width: 88 },
+      { key: 'role', label: 'Role', width: 82 },
+      { key: 'module', label: 'Module', width: 92 },
+      { key: 'eventType', label: 'Event', width: 56, align: 'center' },
+      { key: 'action', label: 'Action', width: 88 },
+      { key: 'request', label: 'Request', width: 140 },
+      { key: 'details', label: 'Details', width: 145 }
+    ],
+    rows,
+    summaryItems: [
+      { label: 'Total Records', value: String(rows.length) },
+      { label: 'Access Logs', value: String(accessCount) },
+      { label: 'Action Logs', value: String(actionCount) },
+      { label: 'Module Filter', value: moduleFilterLabel },
+      { label: 'Event Filter', value: eventFilterLabel },
+      { label: 'Search Query', value: String(query.q || 'None') || 'None' }
+    ],
+    emptyMessage: 'No admin audit log records match the selected filters.',
+    pageSize: 'a4',
+    orientation: 'landscape'
+  });
+
+  return {
+    filename,
+    pdfBuffer: Buffer.from(pdfContent, 'binary')
+  };
 };
 
 const buildListFilter = (query = {}) => {
@@ -96,6 +252,22 @@ const listAdminAuditLogs = async (req, res) => {
   } catch (error) {
     console.error('listAdminAuditLogs error:', error);
     return res.status(500).json({ message: 'Failed to load audit logs' });
+  }
+};
+
+const downloadAdminAuditLogsPdf = async (req, res) => {
+  try {
+    const filter = buildListFilter(req.query);
+    const logs = await AdminAuditLog.find(filter).sort({ createdAt: -1 }).lean();
+    const generatedBy = String(req.user?.fullName || req.user?.username || req.user?.role || 'Officer').trim() || 'Officer';
+    const { filename, pdfBuffer } = buildAdminAuditPdf(logs, generatedBy, req.query);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=\"${filename}\"`);
+    return res.send(pdfBuffer);
+  } catch (error) {
+    console.error('downloadAdminAuditLogsPdf error:', error);
+    return res.status(500).json({ message: 'Failed to download audit log PDF' });
   }
 };
 
@@ -262,6 +434,7 @@ const backfillAdminAuditLogExpiry = async () => {
 module.exports = {
   archiveAdminAuditLogs,
   backfillAdminAuditLogExpiry,
+  downloadAdminAuditLogsPdf,
   downloadAdminAuditLogArchive,
   getAdminAuditLogArchives,
   listAdminAuditLogs,

@@ -5,7 +5,7 @@ import {
   Home, LogOut, Search, UserCheck, Car, Clock, 
   Menu, X, ChevronRight, AlertCircle, CheckCircle,
   LogIn, LogOut as LogOutIcon, User, Phone, MapPin, Package, 
-  Calendar, MessageSquare, Bell, Landmark, Camera, Map as MapIcon, Eye, QrCode, ScanLine, Users, LayoutGrid, Table2
+  Calendar, MessageSquare, Bell, Landmark, Camera, Map as MapIcon, Eye, QrCode, ScanLine, Users, LayoutGrid, Table2, Download
 } from 'lucide-react';
 import './GuardDashboard.css';
 import GuardAnnouncement from '../AnnouncementManagement/GuardAnnouncement';
@@ -13,6 +13,7 @@ import GuardFacilityReservations from '../FacilityManagement/GuardFacilityReserv
 import CCTVFeedsModule from '../CCTV/CCTVFeedsModule';
 import SubdivisionMap3D from '../SubdivisionMap/SubdivisionMap3D';
 import VisitorIdentificationModal from '../common/VisitorIdentificationModal';
+import PaginationControls from '../common/PaginationControls';
 import { SUBDIVISION_MAP_MODULE, hasModuleAccess, getUserRoleLabel } from '../../utils/adminPermissions';
 import { buildPaginatedUrl, parsePaginatedResponse } from '../../utils/pagination';
 import {
@@ -93,6 +94,12 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
 
   const [recentActivity, setRecentActivity] = useState([]);
   const [myActivityLogs, setMyActivityLogs] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityPage, setActivityPage] = useState(1);
+  const [activityPagination, setActivityPagination] = useState(null);
+  const [activitySearchInput, setActivitySearchInput] = useState('');
+  const [activitySearchQuery, setActivitySearchQuery] = useState('');
+  const [activityPdfLoading, setActivityPdfLoading] = useState(false);
   const [guardAnnouncements, setGuardAnnouncements] = useState([]);
 
   const [sessionUser, setSessionUser] = useState(() => JSON.parse(localStorage.getItem('user') || '{}'));
@@ -387,12 +394,29 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
     }
   }, []);
 
-  const fetchMyActivity = useCallback(async () => {
+  const fetchMyActivity = useCallback(async (targetPage = 1, targetQuery = '') => {
+    setActivityLoading(true);
     try {
-      const response = await fetch(apiUrl('/entry-logs'), { headers: { 'Authorization': `Bearer ${token}` } });
-      if (response.ok) { const data = await response.json(); setMyActivityLogs(Array.isArray(data) ? data : []); }
-      else setMyActivityLogs([]);
-    } catch (error) { console.error('Error fetching my activity:', error); setMyActivityLogs([]); }
+      const response = await fetch(
+        apiUrl(buildPaginatedUrl('/entry-logs', targetPage, targetQuery ? { q: targetQuery } : {})),
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        const parsed = parsePaginatedResponse(data);
+        setMyActivityLogs(parsed.items);
+        setActivityPagination(parsed.pagination);
+      } else {
+        setMyActivityLogs([]);
+        setActivityPagination(null);
+      }
+    } catch (error) {
+      console.error('Error fetching my activity:', error);
+      setMyActivityLogs([]);
+      setActivityPagination(null);
+    } finally {
+      setActivityLoading(false);
+    }
   }, [token]);
 
   const fetchActiveVisitors = useCallback(async () => {
@@ -436,11 +460,11 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
   }, [activeModule, menuItems]);
 
   useEffect(() => {
-    if      (activeModule === 'activity')       fetchMyActivity();
+    if      (activeModule === 'activity')       fetchMyActivity(activityPage, activitySearchQuery);
     else if (activeModule === 'exit-log')       { fetchActiveVisitors(); fetchActiveDeliveries(); }
     else if (activeModule === 'entry-log')      fetchResidents();
     else if (activeModule === 'pre-registered') fetchPreRegisteredVisitors();
-  }, [activeModule, fetchMyActivity, fetchActiveVisitors, fetchActiveDeliveries, fetchResidents, fetchPreRegisteredVisitors]);
+  }, [activeModule, activityPage, activitySearchQuery, fetchMyActivity, fetchActiveVisitors, fetchActiveDeliveries, fetchResidents, fetchPreRegisteredVisitors]);
 
   // ── Handlers ─────────────────────────────────────────────────────
   const handleSearch = async () => {
@@ -455,6 +479,75 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
       else setSearchResults([]);
     } catch (error) { console.error('Search error:', error); setSearchResults([]); }
     setLoading(false);
+  };
+
+  const handleActivitySearchSubmit = (event) => {
+    event.preventDefault();
+    const nextQuery = activitySearchInput.trim();
+
+    if (nextQuery === activitySearchQuery) {
+      setActivityPage(1);
+      if (activeModule === 'activity') {
+        fetchMyActivity(1, nextQuery);
+      }
+      return;
+    }
+
+    setActivityPage(1);
+    setActivitySearchQuery(nextQuery);
+  };
+
+  const handleActivitySearchClear = () => {
+    const shouldReloadImmediately = !activitySearchInput && !activitySearchQuery && activityPage === 1;
+
+    setActivitySearchInput('');
+    setActivitySearchQuery('');
+    setActivityPage(1);
+
+    if (shouldReloadImmediately && activeModule === 'activity') {
+      fetchMyActivity(1, '');
+    }
+  };
+
+  const handleDownloadActivityPdf = async () => {
+    setActivityPdfLoading(true);
+
+    try {
+      const params = new URLSearchParams();
+      const trimmedQuery = activitySearchQuery.trim();
+
+      if (trimmedQuery) {
+        params.set('q', trimmedQuery);
+      }
+
+      const queryString = params.toString();
+      const response = await fetch(
+        apiUrl(`/entry-logs/export/pdf${queryString ? `?${queryString}` : ''}`),
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.message || 'Failed to download gate activity PDF');
+      }
+
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get('content-disposition') || '';
+      const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+      const filename = filenameMatch?.[1] || 'gate-activity-log.pdf';
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (error) {
+      showAlert(error.message || 'Failed to download gate activity PDF', 'error');
+    } finally {
+      setActivityPdfLoading(false);
+    }
   };
 
   const handleSelectResident = (resident, fieldPrefix) => {
@@ -1481,9 +1574,55 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
         <div>
           <div className="page-header"><div className="page-title"><h2>Entry / Exit Activity Log</h2><p>View gate and resident-home checkpoint records in one place.</p></div></div>
           <div className="dashboard-card">
-            {!Array.isArray(myActivityLogs) || myActivityLogs.length === 0
-              ? <div className="empty-state"><Clock size={40} style={{ color: '#9ca3af' }} /><h3>No Activity Yet</h3><p>Your activity will appear here</p></div>
-              : <div className="activity-table">
+            <div className="activity-toolbar">
+              <form className="activity-search-form" onSubmit={handleActivitySearchSubmit}>
+                <div className="activity-search-field">
+                  <Search size={18} className="activity-search-icon" />
+                  <input
+                    type="text"
+                    value={activitySearchInput}
+                    onChange={(event) => setActivitySearchInput(event.target.value)}
+                    placeholder="Search plate number, owner, resident, address, or notes"
+                    className="activity-search-input"
+                  />
+                </div>
+                <button type="submit" className="activity-search-submit">Search</button>
+                {(activitySearchInput || activitySearchQuery) && (
+                  <button type="button" className="activity-search-clear" onClick={handleActivitySearchClear}>
+                    Clear
+                  </button>
+                )}
+              </form>
+              <div className="activity-toolbar-actions">
+                <div className="activity-toolbar-meta">
+                  {activityPagination ? `${activityPagination.total} total logs` : `${myActivityLogs.length} logs`}
+                </div>
+                <button
+                  type="button"
+                  className="activity-export-btn"
+                  onClick={handleDownloadActivityPdf}
+                  disabled={activityPdfLoading}
+                >
+                  <Download size={16} />
+                  {activityPdfLoading ? 'Preparing PDF...' : 'Download PDF'}
+                </button>
+              </div>
+            </div>
+
+            {activityLoading ? (
+              <div className="loading-container">
+                <div className="spinner" />
+                <p className="loading-text">Loading gate activity...</p>
+              </div>
+            ) : !Array.isArray(myActivityLogs) || myActivityLogs.length === 0 ? (
+              <div className="empty-state">
+                <Clock size={40} style={{ color: '#9ca3af' }} />
+                <h3>{activitySearchQuery ? 'No Matching Activity' : 'No Activity Yet'}</h3>
+                <p>{activitySearchQuery ? 'Try a different keyword or clear your search.' : 'Your activity will appear here'}</p>
+              </div>
+            ) : (
+              <>
+                <div className="activity-table">
                   <table>
                     <thead><tr><th>Plate Number</th><th>Type</th><th>Owner Type</th><th>Owner/Driver</th><th>Resident/Address</th><th>Date & Time</th><th>Notes</th></tr></thead>
                     <tbody>
@@ -1500,7 +1639,10 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
                       ))}
                     </tbody>
                   </table>
-                </div>}
+                </div>
+                <PaginationControls pagination={activityPagination} onPageChange={setActivityPage} />
+              </>
+            )}
           </div>
         </div>
       );
