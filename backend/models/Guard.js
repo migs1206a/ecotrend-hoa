@@ -22,10 +22,34 @@ const guardSchema = new mongoose.Schema({
     type: [String],
     default: undefined
   },
+  deletedAt: {
+    type: Date,
+    default: null
+  },
+  purgeAfter: {
+    type: Date,
+    default: null
+  },
+  deletedBy: {
+    userId: {
+      type: String,
+      default: ''
+    },
+    username: {
+      type: String,
+      default: ''
+    },
+    role: {
+      type: String,
+      default: ''
+    }
+  },
   createdAt: {
     type: Date,
     default: Date.now
   }
 });
+
+guardSchema.index({ purgeAfter: 1 }, { expireAfterSeconds: 0 });
 
 module.exports = mongoose.model('Guard', guardSchema);

@@ -3,6 +3,7 @@ const {
   hasModuleAccess,
   isModuleManagedUser
 } = require('../utils/adminPermissions');
+const { setAuditLogContext } = require('../utils/adminAuditLog');
 const User = require('../models/User');
 const { isResidentAccountExpired } = require('../utils/residentAccounts');
 
@@ -64,8 +65,12 @@ const requireAccess = ({
   try {
     const hasRoleMatch = hasRequiredRole(req.user, roles);
     const needsModuleCheck = modules.length > 0 && isModuleManagedUser(req.user);
+    const matchedModule = needsModuleCheck
+      ? modules.find((moduleKey) => hasModuleAccess(req.user, moduleKey))
+      : '';
 
-    if (needsModuleCheck && modules.some((moduleKey) => hasModuleAccess(req.user, moduleKey))) {
+    if (matchedModule) {
+      setAuditLogContext(req, { moduleKey: matchedModule });
       return next();
     }
 
@@ -101,6 +106,7 @@ const requireAccess = ({
 
 const requireManageAccounts = (req, res, next) => {
   if (hasAdminModuleAccess(req.user, 'manage_accounts')) {
+    setAuditLogContext(req, { moduleKey: 'manage_accounts' });
     return next();
   }
 
@@ -109,6 +115,7 @@ const requireManageAccounts = (req, res, next) => {
 
 const requireOfficerModule = (moduleKey, message = 'Officer access required') => (req, res, next) => {
   if (hasAdminModuleAccess(req.user, moduleKey)) {
+    setAuditLogContext(req, { moduleKey });
     return next();
   }
 

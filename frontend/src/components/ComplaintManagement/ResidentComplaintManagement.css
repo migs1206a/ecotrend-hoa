@@ -175,6 +175,44 @@
   font-size: 0.82rem;
 }
 
+.resident-complaint-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+
+.resident-complaint-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.34rem 0.7rem;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.resident-complaint-tag.urgency.low {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.resident-complaint-tag.urgency.medium {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.resident-complaint-tag.urgency.high {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.resident-complaint-tag.urgency.urgent {
+  background: #111827;
+  color: #fff;
+}
+
 .resident-complaint-status {
   display: inline-flex;
   align-items: center;

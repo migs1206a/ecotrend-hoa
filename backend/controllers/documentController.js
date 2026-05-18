@@ -6,6 +6,7 @@ const User = require('../models/User');
 const ResidentDocumentSubmission = require('../models/ResidentDocumentSubmission');
 const { storeUploadedFile, deleteStoredFile } = require('../utils/fileStorage');
 const { parsePagination, sendPaginatedResponse } = require('../utils/pagination');
+const { buildBrandedTablePdf } = require('../utils/brandedPdf');
 
 const isAdminRole = (role) => ['ADMIN', 'MASTER_ADMIN'].includes(role);
 const BACKEND_ROOT = path.join(__dirname, '..');
@@ -98,91 +99,15 @@ const streamStoredFileInline = async (file, res) => {
   return false;
 };
 
-const escapePdfText = (value) =>
-  String(value || '')
-    .normalize('NFKD')
-    .replace(/[^\x20-\x7E]/g, '')
-    .replace(/\\/g, '\\\\')
-    .replace(/\(/g, '\\(')
-    .replace(/\)/g, '\\)');
-
-const wrapLine = (text, maxLength = 88) => {
-  const source = normalizeSpaces(text);
-  if (!source) return [''];
-  const words = source.split(/\s+/);
-  const lines = [];
-  let current = '';
-
-  words.forEach((word) => {
-    const candidate = current ? `${current} ${word}` : word;
-    if (candidate.length <= maxLength) {
-      current = candidate;
-      return;
-    }
-    if (current) lines.push(current);
-    current = word;
-  });
-
-  if (current) lines.push(current);
-  return lines;
-};
-
-const buildSimplePdf = (lines) => {
-  const commands = ['BT', '/F1 12 Tf', '16 TL', '40 750 Td'];
-  lines.forEach((line, index) => {
-    if (index > 0) commands.push('T*');
-    commands.push(`(${escapePdfText(line)}) Tj`);
-  });
-  commands.push('ET');
-
-  const content = `${commands.join('\n')}\n`;
-  const objects = [
-    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
-    '2 0 obj\n<< /Type /Pages /Count 1 /Kids [3 0 R] >>\nendobj\n',
-    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n',
-    '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n',
-    `5 0 obj\n<< /Length ${content.length} >>\nstream\n${content}endstream\nendobj\n`
-  ];
-
-  let pdf = '%PDF-1.4\n';
-  const offsets = [0];
-  objects.forEach((object) => {
-    offsets.push(pdf.length);
-    pdf += object;
-  });
-
-  const xrefStart = pdf.length;
-  pdf += `xref\n0 ${objects.length + 1}\n`;
-  pdf += '0000000000 65535 f \n';
-  offsets.slice(1).forEach((offset) => {
-    pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
-  });
-  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
-  return pdf;
-};
-
-const getTemplateLines = (template) => {
-  const title = template?.title || 'Resident Form Template';
-  return [
-    'ECOTREND HOA',
-    title,
-    '',
-    'Resident Name:',
-    '',
-    'Address:',
-    '',
-    'Date:',
-    '',
-    'Subject:',
-    '',
-    'Details:',
-    '',
-    '',
-    'Signature:',
-    '',
-    'Received by ECOTREND HOA'
-  ];
-};
+const getTemplateRows = () => [
+  { cells: ['Resident Name', ''], minHeight: 36 },
+  { cells: ['Address', ''], minHeight: 42 },
+  { cells: ['Date', ''], minHeight: 36 },
+  { cells: ['Subject', ''], minHeight: 42 },
+  { cells: ['Details', ''], minHeight: 92 },
+  { cells: ['Signature', ''], minHeight: 42 },
+  { cells: ['Received By', 'Ecotrend HOA'], minHeight: 36 }
+];
 
 const getResidentProfile = async (userId) => {
   const resident = await User.findById(userId).lean();
@@ -204,7 +129,15 @@ exports.downloadTemplate = async (req, res) => {
     return res.status(404).json({ message: 'Template not found' });
   }
 
-  const pdf = buildSimplePdf(getTemplateLines(template));
+  const pdf = buildBrandedTablePdf({
+    tableTitle: template.title,
+    columns: [
+      { label: 'Field', width: 160 },
+      { label: 'Information', width: 344 }
+    ],
+    rows: getTemplateRows(),
+    rowMinHeight: 36
+  });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${template.key}.pdf"`);
   res.send(Buffer.from(pdf, 'binary'));

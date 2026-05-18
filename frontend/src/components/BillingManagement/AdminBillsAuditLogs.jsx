@@ -2,10 +2,13 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiUrl } from '../../utils/api';
 import {
   CalendarDays,
+  CheckCircle2,
+  Download,
   FileText,
   Pencil,
   PlusCircle,
   Receipt,
+  RotateCcw,
   Save,
   Trash2,
   Wallet,
@@ -25,7 +28,7 @@ const buildEmptyForm = () => ({
 });
 
 const formatCurrency = (amount) =>
-  `P${Number(amount || 0).toLocaleString(undefined, {
+  `₱${Number(amount || 0).toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   })}`;
@@ -52,7 +55,9 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [editingId, setEditingId] = useState('');
+  const [togglingPaidId, setTogglingPaidId] = useState('');
   const [form, setForm] = useState(buildEmptyForm);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(null);
@@ -118,7 +123,9 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
     return {
       totalLogs: pagination?.total ?? logs.length,
       totalAmount,
-      monthAmount
+      monthAmount,
+      paidCount: logs.filter((log) => log.isPaid).length,
+      unpaidCount: logs.filter((log) => !log.isPaid).length
     };
   }, [logs, pagination]);
 
@@ -220,12 +227,98 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
     confirmDelete();
   };
 
+  const togglePaidStatus = (log, paid) => {
+    const runToggle = async () => {
+      setTogglingPaidId(log._id);
+
+      try {
+        const response = await fetch(`${API}/${log._id}/payment-status`, {
+          method: 'PATCH',
+          headers: headers(),
+          body: JSON.stringify({ paid })
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data?.message || 'Failed to update paid status');
+        }
+
+        showAlert && showAlert(
+          paid ? 'Bill marked as paid.' : 'Paid mark removed from bill.',
+          'success'
+        );
+        await fetchLogs(page);
+      } catch (error) {
+        showAlert && showAlert(error.message || 'Failed to update paid status', 'error');
+      }
+
+      setTogglingPaidId('');
+    };
+
+    if (showConfirm) {
+      showConfirm(
+        paid
+          ? `Mark "${log.billName}" as paid today?`
+          : `Undo the paid mark for "${log.billName}"?`,
+        runToggle
+      );
+      return;
+    }
+
+    runToggle();
+  };
+
+  const handleDownloadPdf = async () => {
+    setDownloadingPdf(true);
+
+    try {
+      const response = await fetch(apiUrl('/admin-bill-audit-logs/export/pdf'), {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.message || 'Failed to download bill audit log PDF');
+      }
+
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get('content-disposition') || '';
+      const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+      const filename = filenameMatch?.[1] || 'admin-bills-audit-logs.pdf';
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (error) {
+      showAlert && showAlert(error.message || 'Failed to download bill audit log PDF', 'error');
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
+
   return (
     <div className="admin-bill-audit-root">
       <div className="page-header">
         <div className="page-title">
           <h2>Admin Bills Audit/Logs</h2>
           <p>Track admin-side bills like Meralco, service fees, and other recurring HOA expenses.</p>
+        </div>
+        <div className="admin-bill-audit-page-actions">
+          <button
+            type="button"
+            className="admin-bill-audit-download"
+            onClick={handleDownloadPdf}
+            disabled={downloadingPdf}
+          >
+            <Download size={16} />
+            {downloadingPdf ? 'Preparing PDF...' : 'Download PDF'}
+          </button>
         </div>
       </div>
 
@@ -249,6 +342,13 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
           <div>
             <p>This Month</p>
             <strong>{formatCurrency(totals.monthAmount)}</strong>
+          </div>
+        </div>
+        <div className="admin-bill-audit-card">
+          <div className="admin-bill-audit-icon success"><CheckCircle2 size={18} /></div>
+          <div>
+            <p>Paid / Unpaid</p>
+            <strong>{totals.paidCount} / {totals.unpaidCount}</strong>
           </div>
         </div>
       </div>
@@ -346,14 +446,16 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
             <div className="admin-bill-audit-table-wrap">
               <table className="admin-bill-audit-table">
                 <thead>
-                  <tr>
-                    <th>Bill</th>
-                    <th>Amount</th>
-                    <th>Bill Date</th>
-                    <th>Notes</th>
-                    <th>Recorded By</th>
-                    <th>Last Updated</th>
-                    <th />
+                   <tr>
+                     <th>Bill</th>
+                     <th>Amount</th>
+                     <th>Bill Date</th>
+                     <th>Status</th>
+                     <th>Paid Date</th>
+                     <th>Notes</th>
+                     <th>Recorded By</th>
+                     <th>Last Updated</th>
+                     <th />
                   </tr>
                 </thead>
                 <tbody>
@@ -367,6 +469,23 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
                       </td>
                       <td className="admin-bill-audit-amount">{formatCurrency(log.amount)}</td>
                       <td>{formatDate(log.billDate)}</td>
+                      <td>
+                        <span className={`admin-bill-audit-status ${log.isPaid ? 'paid' : 'unpaid'}`}>
+                          {log.isPaid ? 'Paid' : 'Unpaid'}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="admin-bill-audit-paid-meta">
+                          <strong>{log.paidAt ? formatDateTime(log.paidAt) : '-'}</strong>
+                          <span>
+                            {log.paidBy?.fullName || log.paidBy?.username
+                              ? `By ${log.paidBy.fullName || log.paidBy.username}`
+                              : log.isPaid
+                              ? 'Recorded as paid'
+                              : 'Waiting for payment'}
+                          </span>
+                        </div>
+                      </td>
                       <td className="admin-bill-audit-notes">{log.notes || '-'}</td>
                       <td>
                         <div className="admin-bill-audit-actor">
@@ -376,6 +495,19 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
                       </td>
                       <td>{formatDateTime(log.updatedAt)}</td>
                       <td className="admin-bill-audit-actions">
+                        <button
+                          type="button"
+                          className={`admin-bill-audit-paid-btn ${log.isPaid ? 'undo' : 'mark'}`}
+                          onClick={() => togglePaidStatus(log, !log.isPaid)}
+                          disabled={togglingPaidId === log._id}
+                        >
+                          {log.isPaid ? <RotateCcw size={14} /> : <CheckCircle2 size={14} />}
+                          {togglingPaidId === log._id
+                            ? 'Saving...'
+                            : log.isPaid
+                            ? 'Undo Paid'
+                            : 'Mark Paid'}
+                        </button>
                         <button type="button" className="admin-bill-audit-edit" onClick={() => startEdit(log)}>
                           <Pencil size={14} />
                           Edit

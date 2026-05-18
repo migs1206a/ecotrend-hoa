@@ -259,11 +259,34 @@ const UserSchema = new mongoose.Schema({
     trim: true,
     default: '',
     index: true
+  },
+  deletedAt: {
+    type: Date,
+    default: null
+  },
+  purgeAfter: {
+    type: Date,
+    default: null
+  },
+  deletedBy: {
+    userId: {
+      type: String,
+      default: ''
+    },
+    username: {
+      type: String,
+      default: ''
+    },
+    role: {
+      type: String,
+      default: ''
+    }
   }
 }, {
   timestamps: true
 });
 
+UserSchema.index({ purgeAfter: 1 }, { expireAfterSeconds: 0 });
 
 
 module.exports = mongoose.model('User', UserSchema);

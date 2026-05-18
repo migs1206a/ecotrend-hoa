@@ -15,6 +15,12 @@ export const OFFICER_POSITION_OPTIONS = [
   { value: OFFICER_POSITIONS.BOARD_MEMBER, label: 'Board Member' }
 ];
 
+export const SUBDIVISION_MAP_MODULE = Object.freeze({
+  value: 'subdivision_map',
+  label: '3D Mapped Subdivision Module',
+  description: 'Visual 3D subdivision map for easier navigation, monitoring, facilities, roads, and key locations.'
+});
+
 export const ADMIN_MODULE_OPTIONS = [
   { value: 'overview', label: 'Overview', description: 'Dashboard summary and quick actions.', required: true },
   { value: 'residents', label: 'Residents', description: 'Resident approvals, profiles, and resident records.' },
@@ -27,10 +33,11 @@ export const ADMIN_MODULE_OPTIONS = [
   { value: 'cctv', label: 'CCTV Feeds', description: 'Manage security camera feed names, stream URLs, and availability.' },
   { value: 'billing', label: 'Billing', description: 'Monthly dues, receipts, and billing verification.' },
   { value: 'bill_audit_logs', label: 'Admin Bills Audit/Logs', description: 'Track admin-side bills such as utilities, service fees, and other HOA expenses.' },
+  { value: 'audit_logs', label: 'Audit Logs', description: 'Trace which officer modules were opened and which admin-side actions were completed.' },
   { value: 'documents', label: 'Documents', description: 'Resident document requests and submissions.' },
   { value: 'analytics', label: 'Analytics', description: 'Dashboard analytics and performance insights.' },
   { value: 'ai_chatbot', label: 'AI Chatbot', description: 'Grounded admin chatbot for resident, security, and operations questions.' },
-  { value: 'subdivision_map', label: '3D Mapped Subdivision', description: 'Interactive 3D orientation map for roads, facilities, gates, and residential blocks.', required: true },
+  { ...SUBDIVISION_MAP_MODULE, required: true },
   { value: 'reports', label: 'Reports', description: 'CSV/PDF report generation and archives.' },
   { value: 'settings', label: 'Settings', description: 'System configuration and administrative settings.' }
 ];
@@ -44,7 +51,7 @@ export const GUARD_MODULE_OPTIONS = [
   { value: 'facilities', label: 'Facilities', description: 'View facility reservation schedules.' },
   { value: 'announcements', label: 'Announcements', description: 'Read guard-targeted announcements.' },
   { value: 'cctv', label: 'CCTV Feeds', description: 'View configured security camera feeds.' },
-  { value: 'subdivision_map', label: '3D Mapped Subdivision', description: 'View the shared 3D orientation map for roads, gates, and key locations.', required: true },
+  { ...SUBDIVISION_MAP_MODULE, required: true },
   { value: 'activity', label: 'Activity Log', description: 'View gate activity history and personal logs.' }
 ];
 
@@ -54,28 +61,61 @@ const DEFAULT_ADMIN_MODULE_VALUES = ADMIN_MODULE_VALUES.filter((module) => modul
 
 const MODULE_ACCESS = {
   [OFFICER_POSITIONS.PRESIDENT]: [...ADMIN_MODULE_VALUES, 'manage_accounts'],
-  [OFFICER_POSITIONS.VICE_PRESIDENT]: [...DEFAULT_ADMIN_MODULE_VALUES],
-  [OFFICER_POSITIONS.AUDITOR]: [...DEFAULT_ADMIN_MODULE_VALUES],
-  [OFFICER_POSITIONS.TREASURER]: [...DEFAULT_ADMIN_MODULE_VALUES],
-  [OFFICER_POSITIONS.SECRETARY]: [
+  [OFFICER_POSITIONS.VICE_PRESIDENT]: [
     'overview',
+    'residents',
+    'vehicles',
     'visitors',
     'facilities',
     'complaints',
     'announcements',
     'contact_hoa',
     'cctv',
+    'billing',
+    'audit_logs',
+    'documents',
+    'analytics',
+    'subdivision_map',
+    'reports'
+  ],
+  [OFFICER_POSITIONS.AUDITOR]: [
+    'overview',
+    'billing',
+    'bill_audit_logs',
+    'audit_logs',
+    'analytics',
+    'subdivision_map',
+    'reports'
+  ],
+  [OFFICER_POSITIONS.TREASURER]: [
+    'overview',
+    'residents',
+    'facilities',
+    'billing',
+    'bill_audit_logs',
+    'audit_logs',
+    'analytics',
+    'subdivision_map',
+    'reports'
+  ],
+  [OFFICER_POSITIONS.SECRETARY]: [
+    'overview',
+    'residents',
+    'visitors',
+    'announcements',
+    'contact_hoa',
+    'audit_logs',
     'subdivision_map',
     'documents',
     'reports'
   ],
   [OFFICER_POSITIONS.BOARD_MEMBER]: [
     'overview',
+    'residents',
     'visitors',
     'facilities',
     'complaints',
     'announcements',
-    'contact_hoa',
     'cctv',
     'subdivision_map',
     'reports'
@@ -156,6 +196,25 @@ export const getModuleOptionsForRole = (role = '') => {
   return [];
 };
 
+export const getLockedModulesForRole = (role = '', position = '') => {
+  const normalizedRole = String(role || '').toUpperCase();
+
+  if (normalizedRole === 'MASTER_ADMIN') {
+    return [...ADMIN_MODULE_VALUES, 'manage_accounts'];
+  }
+
+  if (normalizedRole === 'ADMIN') {
+    const normalizedPosition = normalizeOfficerPosition(position, role);
+    return [...(MODULE_ACCESS[normalizedPosition] || DEFAULT_ADMIN_MODULE_VALUES)];
+  }
+
+  if (normalizedRole === 'GUARD') {
+    return [...GUARD_MODULE_VALUES];
+  }
+
+  return [];
+};
+
 export const getDefaultModulesForRole = (role = '', position = '') => {
   const normalizedRole = String(role || '').toUpperCase();
 
@@ -178,24 +237,17 @@ export const getDefaultModulesForRole = (role = '', position = '') => {
 export const normalizeModules = (modules, role = '', position = '') => {
   const allowedModules = getAllowedModulesForRole(role);
   const fallbackModules = getDefaultModulesForRole(role, position);
+  const lockedModules = uniqueModules(
+    getLockedModulesForRole(role, position).filter((moduleKey) =>
+      allowedModules.includes(moduleKey)
+    )
+  );
   const sourceModules = Array.isArray(modules) && modules.length > 0 ? modules : fallbackModules;
   const normalizedModules = uniqueModules(
     sourceModules.filter((moduleKey) => allowedModules.includes(moduleKey))
   );
 
-  ['overview', 'subdivision_map'].forEach((moduleKey) => {
-    if (!allowedModules.includes(moduleKey) || normalizedModules.includes(moduleKey)) {
-      return;
-    }
-
-    if (moduleKey === 'overview') {
-      normalizedModules.unshift(moduleKey);
-    } else {
-      normalizedModules.push(moduleKey);
-    }
-  });
-
-  return normalizedModules;
+  return uniqueModules([...lockedModules, ...normalizedModules]);
 };
 
 export const getEffectiveModules = (user = {}) =>

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { apiUrl } from '../../utils/api';
 import {
@@ -8,6 +8,7 @@ import {
   KeyRound,
   Pencil,
   RefreshCw,
+  RotateCcw,
   Search,
   Shield,
   Trash2,
@@ -19,6 +20,7 @@ import PaginationControls from '../common/PaginationControls';
 import { buildPaginatedUrl, parsePaginatedResponse } from '../../utils/pagination';
 import {
   getEffectiveModules,
+  getLockedModulesForRole,
   getModuleLabel,
   getModuleOptionsForRole,
   getOfficerPositionLabel,
@@ -35,6 +37,23 @@ import '../Dashboard/MasterAdminDashboard.css';
 import './ManageAccountsModule.css';
 
 const API = apiUrl('/master-admin');
+const ACTIVE_SCOPE = 'active';
+const DELETED_SCOPE = 'deleted';
+const ACCOUNT_SUMMARY_DEFAULT = Object.freeze({
+  total: 0,
+  officers: 0,
+  guards: 0,
+  residents: 0,
+  boardMembers: 0
+});
+const ACCOUNT_SORT_OPTIONS = [
+  { value: 'newest', label: 'Newest First' },
+  { value: 'oldest', label: 'Oldest First' },
+  { value: 'name_asc', label: 'Name A-Z' },
+  { value: 'name_desc', label: 'Name Z-A' },
+  { value: 'username_asc', label: 'Username A-Z' },
+  { value: 'username_desc', label: 'Username Z-A' }
+];
 
 const buildCreateForm = (accountType = 'ADMIN', position = OFFICER_POSITIONS.VICE_PRESIDENT) => ({
   username: '',
@@ -64,16 +83,57 @@ const getNextModulesForPosition = (currentModules, role, previousPosition, nextP
   return normalizeModules(currentModules, role, nextPosition);
 };
 
-const getAccountModules = (account) =>
-  getEffectiveModules({
-    role: account?.role,
-    position: account?.position,
-    modules: account?.modules
-  });
+const getAccountModules = (account) => (
+  account?.role === 'RESIDENT'
+    ? []
+    : getEffectiveModules({
+        role: account?.role,
+        position: account?.position,
+        modules: account?.modules
+      })
+);
+
+const getAccountDisplayName = (account) =>
+  account?.role === 'RESIDENT'
+    ? account?.familyName || account?.fullName || 'No family name yet'
+    : account?.fullName || 'No full name yet';
+
+const getAccountTypeLabel = (role = '') => {
+  if (role === 'ADMIN') {
+    return 'Officer';
+  }
+
+  if (role === 'GUARD') {
+    return 'Guard';
+  }
+
+  if (role === 'RESIDENT') {
+    return 'Resident';
+  }
+
+  return 'Account';
+};
+
+const getAssignedRoleLabel = (account = {}) => {
+  if (account.role === 'ADMIN') {
+    return getOfficerPositionLabel(account.position, 'ADMIN');
+  }
+
+  if (account.role === 'GUARD') {
+    return 'Security Team';
+  }
+
+  if (account.role === 'RESIDENT') {
+    return account.isApproved ? 'Resident Portal' : 'Pending Approval';
+  }
+
+  return 'Account';
+};
 
 const ModuleChecklist = ({ role, position, modules, onToggle, variant = 'default' }) => {
   const options = getModuleOptionsForRole(role);
   const normalizedModules = normalizeModules(modules, role, position);
+  const lockedModules = getLockedModulesForRole(role, position);
   const selectedCount = normalizedModules.length;
 
   if (!options.length) {
@@ -91,29 +151,33 @@ const ModuleChecklist = ({ role, position, modules, onToggle, variant = 'default
           <p>Select which modules this account can open in the portal.</p>
         </div>
         {String(role || '').toUpperCase() === 'ADMIN' && (
-          <div className="ma-module-note">Manage Accounts stays reserved for the president portal.</div>
+          <div className="ma-module-note">Officer role defaults stay locked. You can still add extra modules for that officer when needed.</div>
+        )}
+        {String(role || '').toUpperCase() === 'GUARD' && (
+          <div className="ma-module-note">Core guard modules stay locked so every guard keeps baseline access.</div>
         )}
       </div>
 
       <div className={`ma-module-grid ${variant === 'modal' ? 'ma-module-grid--modal' : ''}`}>
         {options.map((option) => {
           const checked = normalizedModules.includes(option.value);
+          const isLocked = lockedModules.includes(option.value) || option.required;
 
           return (
             <label
               key={option.value}
-              className={`ma-module-card ${checked ? 'active' : ''} ${option.required ? 'locked' : ''}`}
+              className={`ma-module-card ${checked ? 'active' : ''} ${isLocked ? 'locked' : ''}`}
             >
               <input
                 type="checkbox"
                 checked={checked}
-                disabled={option.required}
+                disabled={isLocked}
                 onChange={() => onToggle(option.value)}
               />
               <div className="ma-module-copy">
                 <strong>{option.label}</strong>
                 <span>{option.description}</span>
-                {option.required && <em>Required basic access</em>}
+                {isLocked && <em>Locked for this role</em>}
               </div>
             </label>
           );
@@ -126,6 +190,7 @@ const ModuleChecklist = ({ role, position, modules, onToggle, variant = 'default
 const ManageAccountsModule = ({ showConfirm, showAlert }) => {
   const [activePanel, setActivePanel] = useState('create');
   const [accountType, setAccountType] = useState('ADMIN');
+  const [accountScope, setAccountScope] = useState(ACTIVE_SCOPE);
   const [formData, setFormData] = useState(buildCreateForm('ADMIN'));
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -136,9 +201,11 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
   const [accounts, setAccounts] = useState([]);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   const [filterRole, setFilterRole] = useState('ALL');
+  const [sortOption, setSortOption] = useState('newest');
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(null);
+  const [accountSummary, setAccountSummary] = useState(ACCOUNT_SUMMARY_DEFAULT);
 
   const [editModal, setEditModal] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
@@ -179,13 +246,20 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
     return '';
   };
 
+  const validateResidentName = (value) => validateNameValue(value, 'Family name', {
+    minLength: 2,
+    maxLength: 20
+  });
+
+  const validateOfficerOrGuardName = (value) => validateNameValue(value, 'Full name', {
+    minLength: 2,
+    maxLength: 80
+  });
+
   const validateAccountForm = ({ username, fullName, password, confirmPassword, position, modules }, type) => {
-    const fullNameValidation = validateNameValue(fullName, 'Full name', {
-      minLength: 2,
-      maxLength: 80
-    });
-    if (!fullNameValidation.valid) {
-      return fullNameValidation.message;
+    const nameValidation = validateOfficerOrGuardName(fullName);
+    if (!nameValidation.valid) {
+      return nameValidation.message;
     }
 
     if (String(username || '').trim().length < 3) {
@@ -216,11 +290,16 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
     return '';
   };
 
-  const fetchAccounts = useCallback(async (targetPage = 1) => {
+  const fetchAccounts = useCallback(async (targetPage = 1, targetScope = accountScope) => {
     setLoadingAccounts(true);
 
     try {
-      const response = await fetch(apiUrl(buildPaginatedUrl('/master-admin/accounts', targetPage)), {
+      const response = await fetch(apiUrl(buildPaginatedUrl('/master-admin/accounts', targetPage, {
+        scope: targetScope,
+        role: filterRole === 'ALL' ? '' : filterRole,
+        q: searchQuery.trim(),
+        sort: sortOption
+      })), {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await response.json();
@@ -235,18 +314,24 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
 
       setAccounts(parsed.items);
       setPagination(parsed.pagination);
+      setAccountSummary(data?.summary || ACCOUNT_SUMMARY_DEFAULT);
     } catch (error) {
       setAccounts([]);
       setPagination(null);
+      setAccountSummary(ACCOUNT_SUMMARY_DEFAULT);
       setCreateError(error.message || 'Failed to load accounts.');
     } finally {
       setLoadingAccounts(false);
     }
-  }, [token]);
+  }, [accountScope, filterRole, searchQuery, sortOption, token]);
 
   useEffect(() => {
-    fetchAccounts(page);
-  }, [fetchAccounts, page]);
+    if (activePanel !== 'accounts') {
+      return;
+    }
+
+    fetchAccounts(page, accountScope);
+  }, [accountScope, activePanel, fetchAccounts, page]);
 
   const handleCreate = async () => {
     setCreateError('');
@@ -261,10 +346,7 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
     setCreateLoading(true);
 
     try {
-      const fullNameValidation = validateNameValue(formData.fullName, 'Full name', {
-        minLength: 2,
-        maxLength: 80
-      });
+      const fullNameValidation = validateOfficerOrGuardName(formData.fullName);
       const endpoint = accountType === 'ADMIN' ? `${API}/create-admin` : `${API}/create-guard`;
       const payload = accountType === 'ADMIN'
         ? {
@@ -301,10 +383,12 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
       setCreateSuccess(`${accountLabel} account created successfully.`);
       showAlert?.(`${accountLabel} account created successfully.`, 'success');
 
-      if (page !== 1) {
-        setPage(1);
-      } else {
-        fetchAccounts(1);
+      if (activePanel === 'accounts') {
+        if (page !== 1) {
+          setPage(1);
+        } else {
+          fetchAccounts(1, ACTIVE_SCOPE);
+        }
       }
     } catch (error) {
       setCreateError(error.message || 'Failed to create account.');
@@ -318,7 +402,7 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
     setEditMode(mode);
     setEditData({
       username: account.username || '',
-      fullName: account.fullName || '',
+      fullName: account.familyName || account.fullName || '',
       position: normalizeOfficerPosition(account.position, account.role) || OFFICER_POSITIONS.VICE_PRESIDENT,
       modules: getAccountModules(account)
     });
@@ -344,12 +428,13 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
 
     setEditError('');
 
-    const fullNameValidation = validateNameValue(editData.fullName, 'Full name', {
-      minLength: 2,
-      maxLength: 80
-    });
-    if (!fullNameValidation.valid) {
-      setEditError(fullNameValidation.message);
+    const isResident = editTarget.role === 'RESIDENT';
+    const nameValidation = isResident
+      ? validateResidentName(editData.fullName)
+      : validateOfficerOrGuardName(editData.fullName);
+
+    if (!nameValidation.valid) {
+      setEditError(nameValidation.message);
       return;
     }
 
@@ -368,7 +453,7 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
       return;
     }
 
-    if (normalizeModules(editData.modules, editTarget.role, editData.position).length === 0) {
+    if (!isResident && normalizeModules(editData.modules, editTarget.role, editData.position).length === 0) {
       setEditError('Please assign at least one module.');
       return;
     }
@@ -376,21 +461,28 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
     setEditLoading(true);
 
     try {
-      const endpoint = editTarget.role === 'ADMIN'
-        ? `${API}/admin/${editTarget._id}`
-        : `${API}/guard/${editTarget._id}`;
-      const payload = editTarget.role === 'ADMIN'
-        ? {
-            username: editData.username.trim(),
-            fullName: fullNameValidation.value,
-            position: editData.position,
-            modules: normalizeModules(editData.modules, 'ADMIN', editData.position)
-          }
-        : {
-            username: editData.username.trim(),
-            fullName: fullNameValidation.value,
-            modules: normalizeModules(editData.modules, 'GUARD')
-          };
+      let endpoint = `${API}/resident/${editTarget._id}`;
+      let payload = {
+        username: editData.username.trim(),
+        familyName: nameValidation.value
+      };
+
+      if (editTarget.role === 'ADMIN') {
+        endpoint = `${API}/admin/${editTarget._id}`;
+        payload = {
+          username: editData.username.trim(),
+          fullName: nameValidation.value,
+          position: editData.position,
+          modules: normalizeModules(editData.modules, 'ADMIN', editData.position)
+        };
+      } else if (editTarget.role === 'GUARD') {
+        endpoint = `${API}/guard/${editTarget._id}`;
+        payload = {
+          username: editData.username.trim(),
+          fullName: nameValidation.value,
+          modules: normalizeModules(editData.modules, 'GUARD')
+        };
+      }
 
       const response = await fetch(endpoint, {
         method: 'PUT',
@@ -408,7 +500,7 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
 
       showAlert?.('Account updated successfully.', 'success');
       closeEditModal();
-      fetchAccounts(page);
+      fetchAccounts(page, accountScope);
     } catch (error) {
       setEditError(error.message || 'Failed to update account.');
     } finally {
@@ -439,7 +531,9 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
     try {
       const endpoint = editTarget.role === 'ADMIN'
         ? `${API}/admin/${editTarget._id}/password`
-        : `${API}/guard/${editTarget._id}/password`;
+        : editTarget.role === 'GUARD'
+          ? `${API}/guard/${editTarget._id}/password`
+          : `${API}/resident/${editTarget._id}/password`;
 
       const response = await fetch(endpoint, {
         method: 'PUT',
@@ -477,11 +571,15 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
   };
 
   const handleDelete = (account) => {
-    confirmAction(`Delete ${account.role === 'ADMIN' ? 'this officer' : 'this guard'} account?`, async () => {
+    const accountLabel = getAccountTypeLabel(account.role).toLowerCase();
+
+    confirmAction(`Move this ${accountLabel} account to recently deleted?`, async () => {
       try {
         const endpoint = account.role === 'ADMIN'
           ? `${API}/admin/${account._id}`
-          : `${API}/guard/${account._id}`;
+          : account.role === 'GUARD'
+            ? `${API}/guard/${account._id}`
+            : `${API}/resident/${account._id}`;
 
         const response = await fetch(endpoint, {
           method: 'DELETE',
@@ -493,52 +591,64 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
           throw new Error(data.message || 'Failed to delete account.');
         }
 
-        showAlert?.('Account deleted successfully.', 'success');
-        fetchAccounts(page);
+        showAlert?.(data.message || 'Account moved to recently deleted.', 'success');
+        fetchAccounts(page, accountScope);
       } catch (error) {
         showAlert?.(error.message || 'Failed to delete account.', 'error');
       }
     });
   };
 
-  const filteredAccounts = useMemo(() => accounts.filter((account) => {
-    const matchesRole = filterRole === 'ALL' || account.role === filterRole;
-    const query = searchQuery.trim().toLowerCase();
+  const handleRestore = (account) => {
+    const accountLabel = getAccountTypeLabel(account.role).toLowerCase();
 
-    if (!query) {
-      return matchesRole;
-    }
+    confirmAction(`Restore this ${accountLabel} account?`, async () => {
+      try {
+        const endpoint = account.role === 'ADMIN'
+          ? `${API}/admin/${account._id}/restore`
+          : account.role === 'GUARD'
+            ? `${API}/guard/${account._id}/restore`
+            : `${API}/resident/${account._id}/restore`;
 
-    const positionLabel = account.role === 'ADMIN'
-      ? getOfficerPositionLabel(account.position, 'ADMIN').toLowerCase()
-      : 'security guard';
-    const moduleLabels = getAccountModules(account)
-      .map((moduleKey) => getModuleLabel(moduleKey, account.role).toLowerCase())
-      .join(' ');
+        const response = await fetch(endpoint, {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const data = await response.json();
 
-    const matchesSearch = [
-      account.username,
-      account.fullName,
-      positionLabel,
-      moduleLabels
-    ].some((value) => String(value || '').toLowerCase().includes(query));
+        if (!response.ok) {
+          throw new Error(data.message || 'Failed to restore account.');
+        }
 
-    return matchesRole && matchesSearch;
-  }), [accounts, filterRole, searchQuery]);
+        showAlert?.(data.message || 'Account restored successfully.', 'success');
+        fetchAccounts(page, accountScope);
+      } catch (error) {
+        showAlert?.(error.message || 'Failed to restore account.', 'error');
+      }
+    });
+  };
 
-  const officerCount = accounts.filter((account) => account.role === 'ADMIN').length;
-  const guardCount = accounts.filter((account) => account.role === 'GUARD').length;
-  const boardMemberCount = accounts.filter(
-    (account) => account.role === 'ADMIN' && normalizeOfficerPosition(account.position, 'ADMIN') === OFFICER_POSITIONS.BOARD_MEMBER
-  ).length;
+  const officerCount = Number(accountSummary.officers) || 0;
+  const guardCount = Number(accountSummary.guards) || 0;
+  const residentCount = Number(accountSummary.residents) || 0;
+  const boardMemberCount = Number(accountSummary.boardMembers) || 0;
 
-  const formatDate = (value) => new Date(value).toLocaleDateString('en-PH', {
+  const formatDate = (value) => value ? new Date(value).toLocaleDateString('en-PH', {
     year: 'numeric',
     month: 'short',
     day: 'numeric'
-  });
+  }) : 'Not set';
 
   const renderModuleSummary = (account) => {
+    if (account.role === 'RESIDENT') {
+      return (
+        <div className="ma-module-summary">
+          <span className="ma-module-pill">{account.isApproved ? 'Resident Portal' : 'Pending Approval'}</span>
+          {account.accountStatusLabel && <span className="ma-module-pill muted">{account.accountStatusLabel}</span>}
+        </div>
+      );
+    }
+
     const moduleLabels = getAccountModules(account).map((moduleKey) => getModuleLabel(moduleKey, account.role));
     const preview = moduleLabels.slice(0, 3);
     const remaining = moduleLabels.length - preview.length;
@@ -558,9 +668,32 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
     resetCreateForm(nextType);
   };
 
-  const openAccountsPanel = () => {
+  const openAccountsPanel = (targetScope = ACTIVE_SCOPE) => {
     setActivePanel('accounts');
-    fetchAccounts(page);
+    if (page !== 1) {
+      setPage(1);
+    }
+    setAccountScope(targetScope);
+  };
+
+  const handleScopeChange = (nextScope) => {
+    setAccountScope(nextScope);
+    setPage(1);
+  };
+
+  const handleSearchChange = (value) => {
+    setSearchQuery(value);
+    setPage(1);
+  };
+
+  const handleRoleFilterChange = (role) => {
+    setFilterRole(role);
+    setPage(1);
+  };
+
+  const handleSortChange = (value) => {
+    setSortOption(value);
+    setPage(1);
   };
 
   const toggleCreateModule = (moduleKey) => {
@@ -600,7 +733,7 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
           <div>
             <h1 className="ma-page-title">Manage Accounts</h1>
             <p className="ma-page-sub">
-              Create and manage officer and guard accounts, then assign exactly which modules they can access.
+              Create officer and guard accounts, lock role-based module defaults, and manage resident accounts through the directory.
             </p>
           </div>
           <div className="ma-view-switch">
@@ -615,7 +748,7 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
             <button
               type="button"
               className={`ma-view-btn ${activePanel === 'accounts' ? 'active' : ''}`}
-              onClick={openAccountsPanel}
+              onClick={() => openAccountsPanel(accountScope)}
             >
               <Users size={16} />
               Accounts
@@ -626,7 +759,13 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
         <div className="ma-stats-row">
           <span className="ma-stat-pill total"><Shield size={15} /> {officerCount} officer account{officerCount === 1 ? '' : 's'}</span>
           <span className="ma-stat-pill guard"><Users size={15} /> {guardCount} guard account{guardCount === 1 ? '' : 's'}</span>
-          <span className="ma-stat-pill admin"><Shield size={15} /> {boardMemberCount}/3 board members assigned</span>
+          <span className="ma-stat-pill resident"><Users size={15} /> {residentCount} resident account{residentCount === 1 ? '' : 's'}</span>
+          <span className="ma-stat-pill admin">
+            <Shield size={15} />
+            {accountScope === DELETED_SCOPE
+              ? `${boardMemberCount} board member account${boardMemberCount === 1 ? '' : 's'}`
+              : `${boardMemberCount}/3 board members assigned`}
+          </span>
         </div>
 
         {activePanel === 'create' && (
@@ -697,7 +836,7 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
                           <option key={option.value} value={option.value}>{option.label}</option>
                         ))}
                       </select>
-                      <span className="ma-field-note">Default suggestions follow the selected officer role, but you can still fine-tune the checkboxes below.</span>
+                      <span className="ma-field-note">Role-based default modules stay locked. You can still add extra access below.</span>
                     </div>
                   )}
 
@@ -754,7 +893,7 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
                     {createLoading ? <span className="ma-spinner" /> : <UserPlus size={18} />}
                     {createLoading ? 'Creating Account...' : `Create ${accountType === 'ADMIN' ? 'Officer' : 'Guard'} Account`}
                   </button>
-                  <button type="button" className="ma-directory-link" onClick={openAccountsPanel}>
+                  <button type="button" className="ma-directory-link" onClick={() => openAccountsPanel(ACTIVE_SCOPE)}>
                     <Users size={16} />
                     Open Accounts Directory
                   </button>
@@ -766,132 +905,198 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
 
         {activePanel === 'accounts' && (
           <section className="ma-section">
-          <div className="ma-page-header ma-page-header--compact">
-            <div>
-              <h2 className="ma-page-title ma-page-title--small">Account Directory</h2>
-              <p className="ma-page-sub">Review, edit, reset passwords, and remove accounts.</p>
-            </div>
-            <button type="button" className="ma-directory-link" onClick={() => setActivePanel('create')}>
-              <UserPlus size={16} />
-              Create Account
-            </button>
-          </div>
-
-          <div className="ma-toolbar">
-            <div className="ma-search-wrap">
-              <Search size={16} className="ma-search-icon" />
-              <input
-                className="ma-search-input"
-                type="text"
-                placeholder="Search username, full name, role, or module"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-              />
-              {searchQuery && (
-                <button className="ma-search-clear" onClick={() => setSearchQuery('')}>
-                  <X size={14} />
-                </button>
-              )}
+            <div className="ma-page-header ma-page-header--compact">
+              <div>
+                <h2 className="ma-page-title ma-page-title--small">
+                  {accountScope === DELETED_SCOPE ? 'Recently Deleted Accounts' : 'Account Directory'}
+                </h2>
+                <p className="ma-page-sub">
+                  {accountScope === DELETED_SCOPE
+                    ? 'Restore recently deleted officer, guard, and resident accounts before they are purged automatically.'
+                    : 'Review, edit, reset passwords, and move accounts to recently deleted.'}
+                </p>
+              </div>
+              <button type="button" className="ma-directory-link" onClick={() => setActivePanel('create')}>
+                <UserPlus size={16} />
+                Create Account
+              </button>
             </div>
 
-            <div className="ma-filter-wrap">
-              <Filter size={16} />
-              {['ALL', 'ADMIN', 'GUARD'].map((role) => (
-                <button
-                  key={role}
-                  className={`ma-filter-btn ${filterRole === role ? 'active' : ''}`}
-                  onClick={() => setFilterRole(role)}
-                >
-                  {role === 'ALL' ? 'All' : role === 'ADMIN' ? 'Officers' : 'Guards'}
-                </button>
-              ))}
+            <div className="ma-scope-switch">
+              <button
+                type="button"
+                className={`ma-scope-btn ${accountScope === ACTIVE_SCOPE ? 'active' : ''}`}
+                onClick={() => handleScopeChange(ACTIVE_SCOPE)}
+              >
+                Active Accounts
+              </button>
+              <button
+                type="button"
+                className={`ma-scope-btn ${accountScope === DELETED_SCOPE ? 'active' : ''}`}
+                onClick={() => handleScopeChange(DELETED_SCOPE)}
+              >
+                Recently Deleted
+              </button>
             </div>
 
-            <button className="ma-refresh-btn" onClick={() => fetchAccounts(page)} disabled={loadingAccounts}>
-              <RefreshCw size={16} className={loadingAccounts ? 'spin' : ''} />
-              Refresh
-            </button>
-          </div>
-
-          {loadingAccounts ? (
-            <div className="ma-loading">
-              <div className="ma-spinner ma-spinner-lg" />
-              <p>Loading accounts...</p>
-            </div>
-          ) : filteredAccounts.length === 0 ? (
-            <div className="ma-empty">
-              <Users size={36} />
-              <p>No accounts found</p>
-              <span>Try another search or role filter.</span>
-            </div>
-          ) : (
-            <>
-              <div className="ma-table-wrap">
-                <table className="ma-table">
-                  <thead>
-                    <tr>
-                      <th>Account</th>
-                      <th>Type</th>
-                      <th>Assigned Role</th>
-                      <th>Module Access</th>
-                      <th>Created</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredAccounts.map((account) => (
-                      <tr key={account._id}>
-                        <td>
-                          <div className="ma-table-user">
-                            <div className={`ma-table-avatar ${account.role === 'ADMIN' ? 'avatar-admin' : 'avatar-guard'}`}>
-                              {account.username?.[0]?.toUpperCase() || 'A'}
-                            </div>
-                            <div>
-                              <div className="ma-table-username">@{account.username}</div>
-                              <div className="ma-table-name">{account.fullName || 'No full name yet'}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td>
-                          <span className={`ma-account-badge ${account.role === 'ADMIN' ? 'badge-admin' : 'badge-guard'}`}>
-                            {account.role === 'ADMIN' ? 'Officer' : 'Guard'}
-                          </span>
-                        </td>
-                        <td>
-                          {account.role === 'ADMIN' ? (
-                            <span className="ma-position-badge">{getOfficerPositionLabel(account.position, 'ADMIN')}</span>
-                          ) : (
-                            <span className="ma-table-na">Security Team</span>
-                          )}
-                        </td>
-                        <td>{renderModuleSummary(account)}</td>
-                        <td className="ma-table-date">{formatDate(account.createdAt)}</td>
-                        <td>
-                          <div className="ma-action-btns">
-                            <button className="ma-action-btn edit-btn" onClick={() => openEditModal(account, 'info')}>
-                              <Pencil size={16} />
-                            </button>
-                            <button className="ma-action-btn view-btn" onClick={() => openEditModal(account, 'password')}>
-                              <KeyRound size={16} />
-                            </button>
-                            <button className="ma-action-btn delete-btn" onClick={() => handleDelete(account)}>
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <div className="ma-toolbar">
+              <div className="ma-search-wrap">
+                <Search size={16} className="ma-search-icon" />
+                <input
+                  className="ma-search-input"
+                  type="text"
+                  placeholder="Search username, name, role, or module"
+                  value={searchQuery}
+                  onChange={(event) => handleSearchChange(event.target.value)}
+                />
+                {searchQuery && (
+                  <button className="ma-search-clear" onClick={() => handleSearchChange('')}>
+                    <X size={14} />
+                  </button>
+                )}
               </div>
 
-              {pagination && (
-                <div className="ma-pagination-wrap">
-                  <PaginationControls pagination={pagination} onPageChange={setPage} />
+              <div className="ma-filter-wrap">
+                <Filter size={16} />
+                {['ALL', 'ADMIN', 'GUARD', 'RESIDENT'].map((role) => (
+                  <button
+                    key={role}
+                    className={`ma-filter-btn ${filterRole === role ? 'active' : ''}`}
+                    onClick={() => handleRoleFilterChange(role)}
+                  >
+                    {role === 'ALL' ? 'All' : getAccountTypeLabel(role)}
+                  </button>
+                ))}
+              </div>
+
+              <label className="ma-sort-wrap">
+                <span>Sort</span>
+                <select
+                  className="ma-sort-select"
+                  value={sortOption}
+                  onChange={(event) => handleSortChange(event.target.value)}
+                >
+                  {ACCOUNT_SORT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <button className="ma-refresh-btn" onClick={() => fetchAccounts(page, accountScope)} disabled={loadingAccounts}>
+                <RefreshCw size={16} className={loadingAccounts ? 'spin' : ''} />
+                Refresh
+              </button>
+            </div>
+
+            {loadingAccounts ? (
+              <div className="ma-loading">
+                <div className="ma-spinner ma-spinner-lg" />
+                <p>Loading accounts...</p>
+              </div>
+            ) : accounts.length === 0 ? (
+              <div className="ma-empty">
+                <Users size={36} />
+                <p>No accounts found</p>
+                <span>Try another search, role filter, or account scope.</span>
+              </div>
+            ) : (
+              <>
+                <div className="ma-table-wrap">
+                  <table className="ma-table">
+                    <thead>
+                      {accountScope === ACTIVE_SCOPE ? (
+                        <tr>
+                          <th>Account</th>
+                          <th>Type</th>
+                          <th>Assigned Role</th>
+                          <th>Module Access</th>
+                          <th>Created</th>
+                          <th>Actions</th>
+                        </tr>
+                      ) : (
+                        <tr>
+                          <th>Account</th>
+                          <th>Type</th>
+                          <th>Last Known Role</th>
+                          <th>Deleted</th>
+                          <th>Auto Purge</th>
+                          <th>Actions</th>
+                        </tr>
+                      )}
+                    </thead>
+                    <tbody>
+                      {accounts.map((account) => (
+                        <tr key={account._id}>
+                          <td>
+                            <div className="ma-table-user">
+                              <div className={`ma-table-avatar ${account.role === 'ADMIN' ? 'avatar-admin' : account.role === 'GUARD' ? 'avatar-guard' : 'avatar-resident'}`}>
+                                {account.username?.[0]?.toUpperCase() || 'A'}
+                              </div>
+                              <div>
+                                <div className="ma-table-username">@{account.username}</div>
+                                <div className="ma-table-name">{getAccountDisplayName(account)}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td>
+                            <span className={`ma-account-badge ${account.role === 'ADMIN' ? 'badge-admin' : account.role === 'GUARD' ? 'badge-guard' : 'badge-resident'}`}>
+                              {getAccountTypeLabel(account.role)}
+                            </span>
+                          </td>
+                          <td>
+                            {account.role === 'ADMIN' ? (
+                              <span className="ma-position-badge">{getAssignedRoleLabel(account)}</span>
+                            ) : (
+                              <span className="ma-table-na">{getAssignedRoleLabel(account)}</span>
+                            )}
+                          </td>
+                          {accountScope === ACTIVE_SCOPE ? (
+                            <>
+                              <td>{renderModuleSummary(account)}</td>
+                              <td className="ma-table-date">{formatDate(account.createdAt)}</td>
+                              <td>
+                                <div className="ma-action-btns">
+                                  <button className="ma-action-btn edit-btn" onClick={() => openEditModal(account, 'info')}>
+                                    <Pencil size={16} />
+                                  </button>
+                                  <button className="ma-action-btn view-btn" onClick={() => openEditModal(account, 'password')}>
+                                    <KeyRound size={16} />
+                                  </button>
+                                  <button className="ma-action-btn delete-btn" onClick={() => handleDelete(account)}>
+                                    <Trash2 size={16} />
+                                  </button>
+                                </div>
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="ma-table-date">{formatDate(account.deletedAt)}</td>
+                              <td className="ma-table-date">{formatDate(account.purgeAfter)}</td>
+                              <td>
+                                <div className="ma-action-btns">
+                                  <button className="ma-action-btn restore-btn ma-action-btn--label" onClick={() => handleRestore(account)}>
+                                    <RotateCcw size={16} />
+                                    <span>Restore</span>
+                                  </button>
+                                </div>
+                              </td>
+                            </>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              )}
-            </>
-          )}
+
+                {pagination && (
+                  <div className="ma-pagination-wrap">
+                    <PaginationControls pagination={pagination} onPageChange={setPage} />
+                  </div>
+                )}
+              </>
+            )}
           </section>
         )}
       </div>
@@ -902,7 +1107,11 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
             <div className="ma-modal-header">
               <div>
                 <h3 className="ma-modal-title">
-                  {editTarget.role === 'ADMIN' ? 'Edit Officer Account' : 'Edit Guard Account'}
+                  {editTarget.role === 'ADMIN'
+                    ? 'Edit Officer Account'
+                    : editTarget.role === 'GUARD'
+                      ? 'Edit Guard Account'
+                      : 'Edit Resident Account'}
                 </h3>
                 <p className="ma-modal-subtitle">@{editTarget.username}</p>
               </div>
@@ -935,13 +1144,16 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
                 <div className="ma-edit-section ma-edit-section--account">
                   <div className="ma-edit-form-grid">
                     <div className="ma-field">
-                      <label className="ma-label">Full Name</label>
+                      <label className="ma-label">{editTarget.role === 'RESIDENT' ? 'Family Name' : 'Full Name'}</label>
                       <input
                         className="ma-input"
                         type="text"
                         value={editData.fullName}
-                        onChange={(event) => setEditData({ ...editData, fullName: sanitizeNameInput(event.target.value, 80) })}
-                        maxLength={80}
+                        onChange={(event) => setEditData({
+                          ...editData,
+                          fullName: sanitizeNameInput(event.target.value, editTarget.role === 'RESIDENT' ? 20 : 80)
+                        })}
+                        maxLength={editTarget.role === 'RESIDENT' ? 20 : 80}
                       />
                     </div>
 
@@ -979,13 +1191,17 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
                     )}
                   </div>
 
-                  <ModuleChecklist
-                    role={editTarget.role}
-                    position={editData.position}
-                    modules={editData.modules}
-                    onToggle={toggleEditModule}
-                    variant="modal"
-                  />
+                  {editTarget.role !== 'RESIDENT' ? (
+                    <ModuleChecklist
+                      role={editTarget.role}
+                      position={editData.position}
+                      modules={editData.modules}
+                      onToggle={toggleEditModule}
+                      variant="modal"
+                    />
+                  ) : (
+                    <div className="ma-module-note">Resident access is managed through approval status and the resident portal, so there are no officer-style module assignments here.</div>
+                  )}
 
                   <div className="ma-modal-footer">
                     <button className="ma-btn-secondary" onClick={closeEditModal}>Cancel</button>

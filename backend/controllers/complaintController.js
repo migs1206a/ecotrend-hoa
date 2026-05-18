@@ -6,8 +6,24 @@ const { parsePagination, sendPaginatedResponse } = require('../utils/pagination'
 const isAdminRole = (role) => ['ADMIN', 'MASTER_ADMIN'].includes(role);
 const lettersOnlyRegex = /^[A-Za-z\s]+$/;
 const issueTextRegex = /^[A-Za-z0-9\s,.\-#()]+$/;
+const COMPLAINT_CATEGORIES = new Set([
+  'general',
+  'noise_disturbance',
+  'safety_security',
+  'property_damage',
+  'parking',
+  'sanitation',
+  'pets_animals',
+  'harassment',
+  'other'
+]);
+const COMPLAINT_URGENCY_LEVELS = new Set(['low', 'medium', 'high', 'urgent']);
 
 const normalizeSpaces = (value) => String(value || '').trim().replace(/\s+/g, ' ');
+const normalizeOption = (value) =>
+  normalizeSpaces(value)
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
 
 const validateLettersOnly = (value, fieldLabel, maxLength) => {
   const normalized = normalizeSpaces(value);
@@ -39,9 +55,19 @@ const createComplaint = async (req, res) => {
   try {
     const residentId = req.user?.userId;
     const complaintType = normalizeSpaces(req.body.complaintType).toLowerCase();
+    const category = normalizeOption(req.body.category) || 'general';
+    const urgency = normalizeOption(req.body.urgency) || 'medium';
 
     if (!['person', 'issue'].includes(complaintType)) {
       return res.status(400).json({ message: 'Invalid complaint type' });
+    }
+
+    if (!COMPLAINT_CATEGORIES.has(category)) {
+      return res.status(400).json({ message: 'Invalid complaint category' });
+    }
+
+    if (!COMPLAINT_URGENCY_LEVELS.has(urgency)) {
+      return res.status(400).json({ message: 'Invalid complaint urgency' });
     }
 
     const residentProfile = await getResidentProfile(residentId);
@@ -51,6 +77,8 @@ const createComplaint = async (req, res) => {
 
     const payload = {
       complaintType,
+      category,
+      urgency,
       residentId,
       complainantName: residentProfile.complainantName,
       complainantAddress: residentProfile.complainantAddress

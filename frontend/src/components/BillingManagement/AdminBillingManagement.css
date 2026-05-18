@@ -1048,6 +1048,94 @@
   object-fit: contain;
 }
 
+.billing-settings-year-jump {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.billing-year-jump-input {
+  width: 110px;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-lg);
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--gray-900);
+}
+
+.billing-year-jump-btn,
+.billing-dues-open-year-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 700;
+  transition: all 0.2s ease;
+}
+
+.billing-year-jump-btn {
+  padding: 0.75rem 0.95rem;
+  background: linear-gradient(135deg, var(--primary-green), var(--accent-teal));
+  color: var(--white);
+}
+
+.billing-year-jump-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.billing-dues-schedule {
+  margin-top: 1rem;
+  border-top: 1px solid var(--gray-100);
+  padding-top: 1rem;
+}
+
+.billing-dues-schedule-head h4 {
+  margin: 0;
+  color: var(--gray-900);
+}
+
+.billing-dues-schedule-head p {
+  margin: 0.35rem 0 0;
+  color: var(--gray-500);
+}
+
+.billing-dues-schedule-table-wrap {
+  margin-top: 0.9rem;
+  overflow-x: auto;
+}
+
+.billing-dues-schedule-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.billing-dues-schedule-table th,
+.billing-dues-schedule-table td {
+  padding: 0.8rem 0.85rem;
+  border-bottom: 1px solid var(--gray-100);
+  text-align: left;
+}
+
+.billing-dues-schedule-table th {
+  color: var(--gray-500);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.billing-dues-open-year-btn {
+  padding: 0.55rem 0.85rem;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
 @media (max-width: 1200px) {
   .billing-summary-strip {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1062,6 +1150,10 @@
   .billing-dues-grid,
   .billing-filters-row {
     grid-template-columns: 1fr;
+  }
+
+  .billing-settings-year-jump {
+    width: 100%;
   }
 
   .billing-phase-filter {

@@ -8,6 +8,7 @@ const {
   getEffectiveModules,
   normalizeOfficerPosition
 } = require('../utils/adminPermissions');
+const { isSoftDeleted } = require('../utils/accountLifecycle');
 const { appendResidentComputedFields } = require('../utils/residentAccounts');
 
 const getTokenUserId = (user) => user?.userId || user?.id || user?._id || '';
@@ -37,7 +38,7 @@ const buildFreshUserSnapshot = async (decoded) => {
 
   if (role === 'ADMIN') {
     const admin = await Admin.findById(userId).lean();
-    if (!admin) return null;
+    if (!admin || isSoftDeleted(admin)) return null;
 
     const position = normalizeOfficerPosition(admin.position);
     return {
@@ -58,7 +59,7 @@ const buildFreshUserSnapshot = async (decoded) => {
 
   if (role === 'GUARD') {
     const guard = await Guard.findById(userId).lean();
-    if (!guard) return null;
+    if (!guard || isSoftDeleted(guard)) return null;
 
     return {
       ...decoded,
@@ -76,7 +77,7 @@ const buildFreshUserSnapshot = async (decoded) => {
 
   if (role === 'RESIDENT') {
     const resident = await User.findById(userId).lean();
-    if (!resident) return null;
+    if (!resident || isSoftDeleted(resident)) return null;
 
     const residentSnapshot = appendResidentComputedFields(resident);
     return {

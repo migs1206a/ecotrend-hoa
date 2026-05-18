@@ -1,18 +1,19 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import ecohoa from '../../assets/ecohoa.png';
 import { apiUrl } from '../../utils/api';
 import { 
   Home, LogOut, Search, UserCheck, Car, Clock, 
   Menu, X, ChevronRight, AlertCircle, CheckCircle,
   LogIn, LogOut as LogOutIcon, User, Phone, MapPin, Package, 
-  Calendar, MessageSquare, Bell, Landmark, Camera, Map as MapIcon
+  Calendar, MessageSquare, Bell, Landmark, Camera, Map as MapIcon, Eye, QrCode, ScanLine, Users, LayoutGrid, Table2
 } from 'lucide-react';
 import './GuardDashboard.css';
 import GuardAnnouncement from '../AnnouncementManagement/GuardAnnouncement';
 import GuardFacilityReservations from '../FacilityManagement/GuardFacilityReservations';
 import CCTVFeedsModule from '../CCTV/CCTVFeedsModule';
 import SubdivisionMap3D from '../SubdivisionMap/SubdivisionMap3D';
-import { hasModuleAccess, getUserRoleLabel } from '../../utils/adminPermissions';
+import VisitorIdentificationModal from '../common/VisitorIdentificationModal';
+import { SUBDIVISION_MAP_MODULE, hasModuleAccess, getUserRoleLabel } from '../../utils/adminPermissions';
 import { buildPaginatedUrl, parsePaginatedResponse } from '../../utils/pagination';
 import {
   sanitizeNameInput,
@@ -21,6 +22,27 @@ import {
   validatePhoneNumberValue
 } from '../../utils/formSecurity';
 
+const QR_PAYLOAD_PREFIX = 'ECOTREND_VISITOR_QR:';
+const QR_CHECKPOINT_OPTIONS = [
+  { value: 'gate_entry', label: 'Gate Entrance' },
+  { value: 'home_arrival', label: 'Home Entrance' },
+  { value: 'home_exit', label: 'Home Exit' },
+  { value: 'gate_exit', label: 'Gate Exit' }
+];
+const getVisitorAccessCode = (visitor) => String(visitor?.qrManualCode || visitor?.qrToken || '').trim();
+const isQrManagedVisitor = (visitor) => Boolean(
+  visitor?.qrEntryEnabled ||
+  getVisitorAccessCode(visitor) ||
+  (Array.isArray(visitor?.qrCheckpoints) && visitor.qrCheckpoints.length > 0)
+);
+const formatVisitorAccessCode = (value) => String(value || '').trim().match(/.{1,4}/g)?.join('\n') || '';
+const getCheckpointProgress = (visitor, checkpoint) => {
+  const checkpoints = Array.isArray(visitor?.qrCheckpoints) ? visitor.qrCheckpoints : [];
+  const matching = checkpoints.filter((item) => item.checkpoint === checkpoint);
+  return `${matching.filter((item) => item.usedAt).length}/${matching.length || 0}`;
+};
+const getVisitorPartySize = (visitor) => 1 + (Array.isArray(visitor?.accompanyingVisitors) ? visitor.accompanyingVisitors.length : 0);
+
 const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeModule, setActiveModule] = useState('overview');
@@ -28,6 +50,12 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const [searchType, setSearchType] = useState('resident');
   const [searchResults, setSearchResults] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [qrCheckpoint, setQrCheckpoint] = useState('gate_entry');
+  const [qrTokenInput, setQrTokenInput] = useState('');
+  const [qrScannerActive, setQrScannerActive] = useState(false);
+  const qrVideoRef = useRef(null);
+  const qrStreamRef = useRef(null);
+  const qrScanIntervalRef = useRef(null);
   
   const [residents, setResidents] = useState([]);
   const [residentSearchQuery, setResidentSearchQuery] = useState('');
@@ -53,6 +81,9 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const [exitType, setExitType] = useState('visitor');
   const [residentForExit, setResidentForExit] = useState(null);
   const [preRegisteredVisitors, setPreRegisteredVisitors] = useState([]);
+  const [preRegSearchQuery, setPreRegSearchQuery] = useState('');
+  const [preRegisteredViewMode, setPreRegisteredViewMode] = useState('card');
+  const [viewingVisitorIdentification, setViewingVisitorIdentification] = useState(null);
 
   const [stats, setStats] = useState({
     todayEntries: 0, todayExits: 0, todayVisitorEntries: 0,
@@ -113,6 +144,121 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
     }
   }, [onLogout, token]);
 
+  const stopQrScanner = useCallback(() => {
+    if (qrScanIntervalRef.current) {
+      clearInterval(qrScanIntervalRef.current);
+      qrScanIntervalRef.current = null;
+    }
+
+    if (qrStreamRef.current) {
+      qrStreamRef.current.getTracks().forEach((track) => track.stop());
+      qrStreamRef.current = null;
+    }
+
+    setQrScannerActive(false);
+  }, []);
+
+  useEffect(() => stopQrScanner, [stopQrScanner]);
+
+  const extractQrToken = (rawValue = '') => {
+    const value = String(rawValue || '').trim();
+
+    if (value.startsWith(QR_PAYLOAD_PREFIX)) {
+      return value.slice(QR_PAYLOAD_PREFIX.length).trim();
+    }
+
+    return value;
+  };
+
+  const submitQrScan = async (rawValue) => {
+    const qrToken = extractQrToken(rawValue);
+
+    if (!qrToken) {
+      showAlert('Please scan a valid QR pass or enter the short visitor code.', 'error');
+      return;
+    }
+
+    try {
+      const response = await fetch(apiUrl('/visitors/qr/scan'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ qrToken, checkpoint: qrCheckpoint })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        showAlert(data.message || 'Failed to record QR checkpoint.', 'error');
+        return;
+      }
+
+      showAlert(data.message || 'QR checkpoint recorded.', 'success');
+      setQrTokenInput('');
+      stopQrScanner();
+      fetchPreRegisteredVisitors();
+      fetchActiveVisitors();
+      fetchStats();
+      fetchRecentActivity();
+    } catch (error) {
+      showAlert('Failed to record QR checkpoint.', 'error');
+    }
+  };
+
+  const startQrScanner = async () => {
+    if (!('BarcodeDetector' in window)) {
+      showAlert('QR scanning is not supported by this browser. Use the visitor code or QR token in the manual field instead.', 'error');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' }
+      });
+      qrStreamRef.current = stream;
+      setQrScannerActive(true);
+
+      setTimeout(() => {
+        if (qrVideoRef.current) {
+          qrVideoRef.current.srcObject = stream;
+          qrVideoRef.current.play().catch(() => {});
+        }
+      }, 0);
+
+      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+      qrScanIntervalRef.current = setInterval(async () => {
+        const video = qrVideoRef.current;
+        if (!video || video.readyState < 2) return;
+
+        try {
+          const codes = await detector.detect(video);
+          const firstCode = codes[0]?.rawValue;
+          if (firstCode) {
+            await submitQrScan(firstCode);
+          }
+        } catch (error) {
+          console.error('QR scan error:', error);
+        }
+      }, 900);
+    } catch (error) {
+      showAlert('Unable to open camera for QR scanning.', 'error');
+      stopQrScanner();
+    }
+  };
+
+  const loadVisitorCodeIntoScanner = (visitor) => {
+    const accessCode = getVisitorAccessCode(visitor);
+
+    if (!accessCode) {
+      showAlert('No visitor code is available for this pass yet.', 'error');
+      return;
+    }
+
+    setQrTokenInput(accessCode);
+    showAlert('Visitor code loaded into the manual QR field.', 'success');
+  };
+
   useEffect(() => {
     syncCurrentUser();
 
@@ -152,7 +298,7 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
       { id: 'facilities',     icon: Landmark,   label: 'Facility Reservations' },
       { id: 'announcements',  icon: Bell,       label: 'Announcements' },
       { id: 'cctv',           icon: Camera,     label: 'CCTV Feeds' },
-      { id: 'subdivision_map', icon: MapIcon,   label: '3D Subdivision Map' },
+      { id: 'subdivision_map', icon: MapIcon,   label: SUBDIVISION_MAP_MODULE.label },
       { id: 'activity',       icon: Clock,      label: 'Gate Activity Log' }
     ].filter((item) => hasModuleAccess(permissionUser, item.id))),
     [permissionUser]
@@ -202,7 +348,10 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
         entryLogs.forEach(log => {
           const residentInfo = log.residentName ? ` - ${log.residentName}` : '';
           const vehicleInfo  = log.plateNumber !== 'NO-VEHICLE' ? `Vehicle ${log.plateNumber}` : `${log.vehicleOwnerType}`;
-          activities.push({ text: `${vehicleInfo} ${log.logType === 'entry' ? 'entered' : 'exited'} (${log.vehicleOwnerType || 'resident'})${residentInfo}`, time: new Date(log.timestamp).toLocaleTimeString(), date: new Date(log.timestamp).toLocaleDateString(), color: log.logType === 'entry' ? 'green' : 'blue', timestamp: new Date(log.timestamp) });
+          const activityText = log.notes
+            ? `${log.notes}${residentInfo ? ` - ${log.residentName}` : ''}`
+            : `${vehicleInfo} ${log.logType === 'entry' ? 'entered' : 'exited'} (${log.vehicleOwnerType || 'resident'})${residentInfo}`;
+          activities.push({ text: activityText, time: new Date(log.timestamp).toLocaleTimeString(), date: new Date(log.timestamp).toLocaleDateString(), color: log.logType === 'entry' ? 'green' : 'blue', timestamp: new Date(log.timestamp) });
         });
       }
       if (Array.isArray(visitors)) {
@@ -239,13 +388,12 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
   }, []);
 
   const fetchMyActivity = useCallback(async () => {
-    if (!user.id) return;
     try {
-      const response = await fetch(apiUrl(`/entry-logs/guard/${user.id}`), { headers: { 'Authorization': `Bearer ${token}` } });
+      const response = await fetch(apiUrl('/entry-logs'), { headers: { 'Authorization': `Bearer ${token}` } });
       if (response.ok) { const data = await response.json(); setMyActivityLogs(Array.isArray(data) ? data : []); }
       else setMyActivityLogs([]);
     } catch (error) { console.error('Error fetching my activity:', error); setMyActivityLogs([]); }
-  }, [user.id, token]);
+  }, [token]);
 
   const fetchActiveVisitors = useCallback(async () => {
     try {
@@ -416,6 +564,12 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
     }
 
     const isDelivery = exitType === 'delivery';
+
+    if (!isDelivery && isQrManagedVisitor(selectedItem)) {
+      showAlert('This is a QR-approved visit. Log exit in the Pre-Registered Visitors module.', 'info');
+      return;
+    }
+
     const itemName   = isDelivery ? selectedItem.driverName : selectedItem.name;
     const normalizedItemName = validateNameValue(sanitizeNameInput(itemName, 80), isDelivery ? 'Driver name' : 'Visitor name', {
       minLength: 2,
@@ -445,7 +599,15 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
     });
   };
 
-  const handleSelectItem = (item, type) => { setSelectedItem(item); setExitType(type); setItemSearchQuery(''); };
+  const handleSelectItem = (item, type) => {
+    setSelectedItem(item);
+    setExitType(type);
+    setItemSearchQuery('');
+
+    if (type === 'visitor' && isQrManagedVisitor(item)) {
+      showAlert('This is a QR-approved visit. Log exit in the Pre-Registered Visitors module.', 'info');
+    }
+  };
 
   const handlePreRegisteredEntry = async (visitor) => {
     const companionCount = Array.isArray(visitor.accompanyingVisitors) ? visitor.accompanyingVisitors.length : 0;
@@ -482,6 +644,64 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
       } catch (error) { console.error('Cancel error:', error); showAlert('Failed to cancel visitor', 'error'); }
       setLoading(false);
     });
+  };
+
+  const openVisitorIdentification = async (visitor) => {
+    if (!visitor?.identificationDocument?.path) {
+      showAlert('No visitor identification is attached to this record.', 'error');
+      return;
+    }
+
+    setViewingVisitorIdentification(visitor);
+  };
+
+  const handleForgottenQrCheckpoint = (visitor, checkpoint) => {
+    showConfirm('Bypass this forgotten QR scan checkpoint?', async () => {
+      setLoading(true);
+      try {
+        const response = await fetch(apiUrl(`/visitors/${visitor._id}/qr/forgot`), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ checkpoint })
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          showAlert(data.message || 'Failed to bypass QR checkpoint.', 'error');
+          setLoading(false);
+          return;
+        }
+
+        showAlert(data.message || 'QR checkpoint bypassed.', 'success');
+        fetchPreRegisteredVisitors();
+        fetchActiveVisitors();
+        fetchStats();
+      } catch (error) {
+        showAlert('Failed to bypass QR checkpoint.', 'error');
+      }
+      setLoading(false);
+    });
+  };
+
+  const promptForgottenQrCheckpoint = (visitor, direction) => {
+    const place = window.prompt(`Forgot to scan ${direction}. Type HOME or GATE:`);
+    const normalizedPlace = String(place || '').trim().toLowerCase();
+    let checkpoint = '';
+
+    if (direction === 'entrance' && normalizedPlace === 'gate') checkpoint = 'gate_entry';
+    if (direction === 'entrance' && normalizedPlace === 'home') checkpoint = 'home_arrival';
+    if (direction === 'exit' && normalizedPlace === 'home') checkpoint = 'home_exit';
+    if (direction === 'exit' && normalizedPlace === 'gate') checkpoint = 'gate_exit';
+
+    if (!checkpoint) {
+      if (normalizedPlace) showAlert('Please type HOME or GATE for the forgotten scan location.', 'error');
+      return;
+    }
+
+    handleForgottenQrCheckpoint(visitor, checkpoint);
   };
 
   const filteredResidents  = residents.filter(r => r.familyName.toLowerCase().includes(residentSearchQuery.toLowerCase()) || r.houseAddress.toLowerCase().includes(residentSearchQuery.toLowerCase()) || r.street.toLowerCase().includes(residentSearchQuery.toLowerCase()));
@@ -583,17 +803,17 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
   );
 
   const PreRegisteredVisitorsContent = () => {
-    const [preRegSearchQuery, setPreRegSearchQuery] = useState('');
     const filteredPreReg = preRegisteredVisitors.filter(v =>
       v.name.toLowerCase().includes(preRegSearchQuery.toLowerCase()) ||
       v.hostResidentName.toLowerCase().includes(preRegSearchQuery.toLowerCase()) ||
       (v.vehiclePlateNumber && v.vehiclePlateNumber.toLowerCase().includes(preRegSearchQuery.toLowerCase()))
     );
+    const pendingCount = filteredPreReg.filter((visitor) => visitor.reviewStatus === 'pending').length;
 
     return (
       <div>
         <div className="page-header">
-          <div className="page-title"><h2>Pre-Registered Visitors</h2><p>Visitors pre-registered by residents</p></div>
+          <div className="page-title"><h2>Pre-Registered Visitors</h2><p>Process QR-approved arrivals at the gate and continue regular entries for non-QR approvals.</p></div>
         </div>
 
         <div className="search-input-group" style={{ marginBottom: '1.5rem' }}>
@@ -601,13 +821,55 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
           <input type="text" value={preRegSearchQuery} onChange={(e) => setPreRegSearchQuery(e.target.value)} placeholder="Search by name, host, or plate number..." className="search-input" style={{ paddingLeft: '3rem' }} />
         </div>
 
+        <div className="guard-qr-panel">
+          <div className="guard-qr-panel-head">
+            <div>
+              <h3><QrCode size={18} /> QR Checkpoint Scanner</h3>
+              <p>Select a gate checkpoint, then scan the QR or enter the short visitor code manually when camera access is unavailable.</p>
+            </div>
+            <select value={qrCheckpoint} onChange={(e) => setQrCheckpoint(e.target.value)} className="form-input">
+              {QR_CHECKPOINT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="guard-qr-controls">
+            <button type="button" className="btn-approve" onClick={qrScannerActive ? stopQrScanner : startQrScanner}>
+              <ScanLine size={16} />{qrScannerActive ? 'Stop Scanner' : 'Scan QR'}
+            </button>
+            <input
+              type="text"
+              value={qrTokenInput}
+              onChange={(e) => setQrTokenInput(e.target.value)}
+              placeholder="Short visitor code or QR token"
+              className="form-input"
+            />
+            <button type="button" className="btn-approve" onClick={() => submitQrScan(qrTokenInput)}>
+              <CheckCircle size={16} />Record
+            </button>
+          </div>
+          {qrScannerActive && <video ref={qrVideoRef} className="guard-qr-video" muted playsInline />}
+        </div>
+
         <div style={{ marginBottom: '1rem', padding: '1rem', backgroundColor: 'white', borderRadius: '0.5rem', boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
             <div>
               <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: '600', color: '#1f2937' }}>Total Pre-Registered</h3>
-              <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.875rem', color: '#6b7280' }}>Awaiting entry</p>
+              <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.875rem', color: '#6b7280' }}>{pendingCount} pending review, {filteredPreReg.length - pendingCount} already active or reviewed</p>
             </div>
-            <div style={{ fontSize: '2rem', fontWeight: '700', color: '#8b5cf6' }}>{filteredPreReg.length}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <div className="module-view-toggle">
+                <button type="button" className={`module-view-toggle__btn ${preRegisteredViewMode === 'card' ? 'active' : ''}`} onClick={() => setPreRegisteredViewMode('card')}>
+                  <LayoutGrid size={16} />
+                  <span>Cards</span>
+                </button>
+                <button type="button" className={`module-view-toggle__btn ${preRegisteredViewMode === 'table' ? 'active' : ''}`} onClick={() => setPreRegisteredViewMode('table')}>
+                  <Table2 size={16} />
+                  <span>Table</span>
+                </button>
+              </div>
+              <div style={{ fontSize: '2rem', fontWeight: '700', color: '#8b5cf6' }}>{filteredPreReg.length}</div>
+            </div>
           </div>
         </div>
 
@@ -615,18 +877,95 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
           <div className="loading-container"><div className="spinner"></div><p className="loading-text">Loading pre-registered visitors...</p></div>
         ) : filteredPreReg.length === 0 ? (
           <div className="empty-state"><div className="empty-icon"><Calendar size={40} style={{ color: '#9ca3af' }} /></div><h3>No Pre-Registered Visitors</h3><p>{preRegSearchQuery ? 'Try a different search term' : 'No visitors have been pre-registered yet'}</p></div>
+        ) : preRegisteredViewMode === 'table' ? (
+          <div className="module-table-card">
+            <div className="module-table-wrap">
+              <table className="module-table">
+                <thead>
+                  <tr>
+                    <th>Visitor</th>
+                    <th>Host / Purpose</th>
+                    <th>Schedule</th>
+                    <th>Status</th>
+                    <th>QR Progress</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredPreReg.map((visitor) => (
+                    <tr key={visitor._id}>
+                      <td>
+                        <span className="module-table__primary">{visitor.name}</span>
+                        <span className="module-table__secondary">{visitor.relationshipToResident || 'Relationship not set'} · Party size: {getVisitorPartySize(visitor)}</span>
+                      </td>
+                      <td>
+                        <span className="module-table__primary">{visitor.hostResidentName}</span>
+                        <span className="module-table__secondary">{visitor.purpose}</span>
+                      </td>
+                      <td>
+                        <span className="module-table__primary">{visitor.expectedDate ? new Date(visitor.expectedDate).toLocaleString() : 'Any time'}</span>
+                        <span className="module-table__secondary">Created {new Date(visitor.createdAt).toLocaleDateString()}</span>
+                      </td>
+                      <td>
+                        <span className={`module-table__pill ${visitor.reviewStatus === 'pending' ? 'pending' : isQrManagedVisitor(visitor) ? 'info' : visitor.status === 'inside' ? 'success' : 'approved'}`}>
+                          {visitor.reviewStatus === 'pending' ? 'Pending Review' : isQrManagedVisitor(visitor) ? 'QR Approved' : visitor.status === 'inside' ? 'Inside' : 'Approved'}
+                        </span>
+                      </td>
+                      <td>
+                        {isQrManagedVisitor(visitor) ? (
+                          <div className="module-table__progress">
+                            <span>Gate In: {getCheckpointProgress(visitor, 'gate_entry')}</span>
+                            <span>Gate Out: {getCheckpointProgress(visitor, 'gate_exit')}</span>
+                            {getVisitorAccessCode(visitor) && <span className="module-table__code">{formatVisitorAccessCode(getVisitorAccessCode(visitor))}</span>}
+                          </div>
+                        ) : (
+                          <span className="module-table__empty">Regular pre-registered entry</span>
+                        )}
+                      </td>
+                      <td>
+                        <div className="module-table__actions">
+                          {visitor.identificationDocument?.path && (
+                            <button type="button" onClick={() => openVisitorIdentification(visitor)} className="module-table__action-btn secondary">
+                              <Eye size={14} /> View ID
+                            </button>
+                          )}
+                          {isQrManagedVisitor(visitor) && getVisitorAccessCode(visitor) && (
+                            <button type="button" onClick={() => loadVisitorCodeIntoScanner(visitor)} className="module-table__action-btn info">
+                              <QrCode size={14} /> Use Code
+                            </button>
+                          )}
+                          {visitor.reviewStatus !== 'pending' && !isQrManagedVisitor(visitor) && visitor.status === 'pre-registered' && (
+                            <button type="button" onClick={() => handlePreRegisteredEntry(visitor)} className="module-table__action-btn success" disabled={loading}>
+                              <LogIn size={14} /> Log Entry
+                            </button>
+                          )}
+                          <button type="button" onClick={() => handleCancelPreRegistered(visitor._id)} className="module-table__action-btn danger" disabled={loading}>
+                            <X size={14} /> Cancel
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         ) : (
           <div className="visitor-logs-grid">
             {filteredPreReg.map((visitor) => (
               <div key={visitor._id} className="visitor-log-card">
                 <div className="visitor-log-header">
                   <div><h3>{visitor.name}</h3><p className="visitor-log-type"><Calendar size={14} /> Pre-Registered</p></div>
-                  <span className="status-badge" style={{ background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)', color: '#d97706' }}>Pending Entry</span>
+                  <span className="status-badge" style={visitor.reviewStatus === 'pending' ? { background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)', color: '#d97706' } : { background: 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)', color: '#15803d' }}>
+                    {visitor.reviewStatus === 'pending' ? 'Pending Review' : isQrManagedVisitor(visitor) ? 'QR Approved' : visitor.status === 'inside' ? 'Inside Subdivision' : 'Approved'}
+                  </span>
                 </div>
                 <div className="visitor-log-details">
                   <div className="visitor-log-detail"><User size={14} /><span>Host: {visitor.hostResidentName}</span></div>
+                  <div className="visitor-log-detail"><Users size={14} /><span>Relationship: {visitor.relationshipToResident || 'Not set'}</span></div>
                   <div className="visitor-log-detail"><MapPin size={14} /><span>{visitor.hostResidentAddress}</span></div>
                   <div className="visitor-log-detail"><MessageSquare size={14} /><span>Purpose: {visitor.purpose}</span></div>
+                  <div className="visitor-log-detail"><QrCode size={14} /><span>Party Size: {getVisitorPartySize(visitor)} person{getVisitorPartySize(visitor) > 1 ? 's' : ''}</span></div>
                   {visitor.contactNumber    && <div className="visitor-log-detail"><Phone size={14} /><span>{visitor.contactNumber}</span></div>}
                   {visitor.vehiclePlateNumber && <div className="visitor-log-detail"><Car size={14} /><span>{visitor.vehiclePlateNumber} ({visitor.vehicleType || 'N/A'})</span></div>}
                   {visitor.expectedDate      && <div className="visitor-log-detail"><Clock size={14} /><span>Expected: {new Date(visitor.expectedDate).toLocaleString()}</span></div>}
@@ -644,10 +983,39 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
                     ))}
                   </div>
                 )}
-                <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
-                  <button onClick={() => handlePreRegisteredEntry(visitor)} className="btn-approve" style={{ flex: 1 }} disabled={loading}><LogIn size={18} />Log Entry</button>
-                  <button onClick={() => handleCancelPreRegistered(visitor._id)} className="btn-reject" style={{ flex: 1 }} disabled={loading}><X size={18} />Cancel</button>
+                {isQrManagedVisitor(visitor) && getVisitorAccessCode(visitor) && (
+                  <div className="guard-visitor-code-card">
+                    <div>
+                      <span className="guard-visitor-code-label">Visitor Code</span>
+                      <strong>{formatVisitorAccessCode(getVisitorAccessCode(visitor))}</strong>
+                      <p>Use this short code when the visitor only has a screenshot or when camera-based scanning is unavailable. Gate Entry: {getCheckpointProgress(visitor, 'gate_entry')}. Gate Exit: {getCheckpointProgress(visitor, 'gate_exit')}.</p>
+                    </div>
+                    <button type="button" className="guard-secondary-btn" onClick={() => loadVisitorCodeIntoScanner(visitor)}>
+                      <QrCode size={16} /> Use Code
+                    </button>
+                  </div>
+                )}
+                <div className="guard-pre-reg-actions">
+                  {visitor.identificationDocument?.path && (
+                    <button onClick={() => openVisitorIdentification(visitor)} className="guard-secondary-btn" disabled={loading}><Eye size={18} />View ID</button>
+                  )}
+                  {visitor.reviewStatus === 'pending' ? (
+                    <span className="guard-inline-note">Waiting for admin review</span>
+                  ) : (!isQrManagedVisitor(visitor) && visitor.status === 'pre-registered') ? (
+                    <button onClick={() => handlePreRegisteredEntry(visitor)} className="guard-success-btn" disabled={loading}><LogIn size={18} />Log Entry</button>
+                  ) : isQrManagedVisitor(visitor) ? (
+                    <span className="guard-inline-note">Use the QR panel above for Gate Entry and Gate Exit.</span>
+                  ) : (
+                    <span className="guard-inline-note">Handled in the regular Exit Log.</span>
+                  )}
+                  <button onClick={() => handleCancelPreRegistered(visitor._id)} className="guard-danger-btn" disabled={loading}><X size={18} />Cancel</button>
                 </div>
+                {isQrManagedVisitor(visitor) && (
+                  <div className="guard-forgot-qr-actions">
+                    <button type="button" onClick={() => promptForgottenQrCheckpoint(visitor, 'entrance')}>Forgot To Scan Entrance</button>
+                    <button type="button" onClick={() => promptForgottenQrCheckpoint(visitor, 'exit')}>Forgot To Scan Exit</button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -995,13 +1363,18 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
                             </div>
                           </div>
                           <span style={{ fontSize:'0.7rem', fontWeight:700, padding:'0.25rem 0.625rem', borderRadius:'6px', background: isRes ? '#dbeafe' : '#ecfdf5', color: isRes ? '#2563eb' : '#059669' }}>
-                            {isRes ? 'Resident' : 'Inside'}
+                            {isRes ? 'Resident' : isQrManagedVisitor(item) ? 'QR Visit' : 'Inside'}
                           </span>
                         </div>
                         {!isRes && item.entryTime && (
                           <div style={{ display:'flex', alignItems:'center', gap:'0.375rem', fontSize:'0.775rem', color:'#9ca3af' }}>
                             <Clock size={11}/><span>{new Date(item.entryTime).toLocaleString()}</span>
                             {item.vehiclePlateNumber && <><Car size={11} style={{marginLeft:'0.375rem'}}/><span>{item.vehiclePlateNumber}</span></>}
+                          </div>
+                        )}
+                        {!isRes && exitType === 'visitor' && isQrManagedVisitor(item) && (
+                          <div style={{ padding:'0.55rem 0.7rem', borderRadius:'10px', background:'#eff6ff', color:'#1d4ed8', fontSize:'0.76rem', fontWeight:700 }}>
+                            QR-approved visit. Exit must be recorded in Pre-Registered Visitors.
                           </div>
                         )}
                       </div>
@@ -1066,13 +1439,28 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
                       </span>
                     </div>
                   </div>
+                  {exitType==='visitor' && isQrManagedVisitor(selectedItem) ? (
+                    <div style={{ background:'#eff6ff', border:'2px solid #bfdbfe', borderRadius:'16px', padding:'1.1rem', textAlign:'center' }}>
+                      <p style={{ margin:0, fontWeight:800, fontSize:'0.95rem', color:'#1d4ed8' }}>This is a QR-approved visit.</p>
+                      <p style={{ margin:'0.4rem 0 0', fontSize:'0.86rem', color:'#475569', lineHeight:1.5 }}>
+                        Log exit in the Pre-Registered Visitors module so the Gate Exit QR checkpoint is recorded properly.
+                      </p>
+                    </div>
+                  ) : (
                   <div style={{ background:'#fff7ed', border:'2px solid #fed7aa', borderRadius:'16px', padding:'1rem', textAlign:'center' }}>
                     <p style={{ margin:0, fontWeight:700, fontSize:'0.9rem', color:'#111827' }}>Confirm exit for</p>
                     <p style={{ margin:'0.25rem 0 0', fontWeight:800, fontSize:'1.1rem', color:'#f97316' }}>{exitType==='visitor'?selectedItem.name:selectedItem.driverName}</p>
                   </div>
+                  )}
+                  {exitType==='visitor' && isQrManagedVisitor(selectedItem) ? (
+                    <button onClick={() => setActiveModule('pre-registered')} style={{ width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:'0.625rem', padding:'0.875rem', background:'linear-gradient(135deg,#2563eb,#1d4ed8)', color:'white', border:'none', borderRadius:'14px', fontSize:'1rem', fontWeight:700, cursor:'pointer', boxShadow:'0 6px 18px rgba(37,99,235,0.3)', fontFamily:'inherit' }}>
+                      <QrCode size={18}/>Open Pre-Registered Visitors
+                    </button>
+                  ) : (
                   <button onClick={handleItemExit} disabled={loading} style={{ width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:'0.625rem', padding:'0.875rem', background: loading?'#9ca3af':'linear-gradient(135deg,#f97316,#ea580c)', color:'white', border:'none', borderRadius:'14px', fontSize:'1rem', fontWeight:700, cursor: loading?'not-allowed':'pointer', boxShadow: loading?'none':'0 6px 18px rgba(249,115,22,0.35)', fontFamily:'inherit' }}>
                     <LogOutIcon size={18}/>{loading ? 'Logging Exit...' : 'Confirm Exit'}
                   </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -1091,7 +1479,7 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
     if (activeModule === 'activity') {
       return (
         <div>
-          <div className="page-header"><div className="page-title"><h2>Gate Activity Log</h2><p>View your recent activities and logs</p></div></div>
+          <div className="page-header"><div className="page-title"><h2>Entry / Exit Activity Log</h2><p>View gate and resident-home checkpoint records in one place.</p></div></div>
           <div className="dashboard-card">
             {!Array.isArray(myActivityLogs) || myActivityLogs.length === 0
               ? <div className="empty-state"><Clock size={40} style={{ color: '#9ca3af' }} /><h3>No Activity Yet</h3><p>Your activity will appear here</p></div>
@@ -1189,6 +1577,13 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
             {renderContent()}
           </div>
         </div>
+        {viewingVisitorIdentification && (
+          <VisitorIdentificationModal
+            visitor={viewingVisitorIdentification}
+            token={token}
+            onClose={() => setViewingVisitorIdentification(null)}
+          />
+        )}
       </main>
     </div>
   );

@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import ecohoa from '../../assets/ecohoa.png';
-import { apiUrl } from '../../utils/api';
+import { apiUrl, assetUrl } from '../../utils/api';
 import { 
   Home, LogOut, Users, Car, UserCheck, Calendar, 
   Bell, BarChart3, FileText, Shield,
   Menu, X, ChevronRight, TrendingUp, AlertCircle, CheckCircle, XCircle,
   Eye, Download, Search, Clock, MapPin, Phone, Package, User,
-  LayoutGrid, Table2, Mail, Bot, Receipt, Camera, Map as MapIcon
+  LayoutGrid, Table2, Mail, Bot, Receipt, Camera, Map as MapIcon, History, QrCode
 } from 'lucide-react';
 import './AdminDashboard.css';
 import AdminAnnouncementManagement from '../AnnouncementManagement/AdminAnnouncementManagement';
+import AdminAuditLogs from '../AuditLogs/AdminAuditLogs';
 import AdminFacilityManagement from '../FacilityManagement/AdminFacilityManagement';
 import AdminBillingManagement from '../BillingManagement/AdminBillingManagement';
 import AdminBillsAuditLogs from '../BillingManagement/AdminBillsAuditLogs';
@@ -23,8 +24,9 @@ import ManageAccountsModule from '../Accounts/ManageAccountsModule';
 import AIAnalyticsModule from '../Analytics/AIAnalyticsModule';
 import AdminAIChatbotModule from '../Chatbot/AdminAIChatbotModule';
 import PaginationControls from '../common/PaginationControls';
+import VisitorIdentificationModal from '../common/VisitorIdentificationModal';
 import { PAGE_SIZE, buildPaginatedUrl, parsePaginatedResponse } from '../../utils/pagination';
-import { hasAdminModuleAccess, getUserRoleLabel } from '../../utils/adminPermissions';
+import { SUBDIVISION_MAP_MODULE, hasAdminModuleAccess, getUserRoleLabel } from '../../utils/adminPermissions';
 import {
   formatResidentAddress,
   formatResidentExpiry,
@@ -49,6 +51,65 @@ const formatDateInputValue = (value) => {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '' : date.toISOString().split('T')[0];
 };
+
+const RESIDENT_SORT_OPTIONS = [
+  { value: 'newest', label: 'Newest First' },
+  { value: 'oldest', label: 'Oldest First' },
+  { value: 'family_asc', label: 'Family Name A-Z' },
+  { value: 'family_desc', label: 'Family Name Z-A' }
+];
+
+const buildResidentEditDraft = (resident = {}) => ({
+  familyName: resident.familyName || '',
+  email: resident.email || '',
+  phoneNumber: resident.phoneNumber || '',
+  street: resident.street || '',
+  block: resident.block || '',
+  lot: resident.lot || '',
+  phase: resident.phase || '',
+  buildingName: resident.buildingName || '',
+  unitNumber: resident.unitNumber || ''
+});
+
+const formatResidentDraftAddress = (draft = {}, propertyType = 'house') => {
+  const parts = [];
+
+  if (draft.block) {
+    parts.push(`Block ${draft.block}`);
+  }
+
+  if (draft.lot) {
+    parts.push(`Lot ${draft.lot}`);
+  }
+
+  if (draft.phase) {
+    parts.push(`Phase ${draft.phase}`);
+  }
+
+  if (propertyType === 'apartment') {
+    if (draft.buildingName) {
+      parts.push(draft.buildingName);
+    }
+
+    if (draft.unitNumber) {
+      parts.push(`Unit ${draft.unitNumber}`);
+    }
+  }
+
+  if (draft.street) {
+    parts.push(draft.street);
+  }
+
+  return parts.join(', ') || 'Complete the address fields to preview the full home address.';
+};
+
+const formatVisitorAccessCode = (value) => String(value || '').trim().match(/.{1,4}/g)?.join('\n') || '';
+const getVisitorPartySize = (visitor) => 1 + (Array.isArray(visitor?.accompanyingVisitors) ? visitor.accompanyingVisitors.length : 0);
+const isQrManagedVisitor = (visitor) => Boolean(
+  visitor?.qrEntryEnabled ||
+  String(visitor?.qrManualCode || visitor?.qrToken || '').trim() ||
+  (Array.isArray(visitor?.qrCheckpoints) && visitor.qrCheckpoints.length > 0)
+);
 
 // ── OUTSIDE AdminDashboard kasi nagbblink due to currentTime re-renders (nakikisabay yarn HAHAHA) ──────
 
@@ -86,12 +147,20 @@ const ResidentDetailModal = ({
   onReject,
   onApproveRenewal,
   onRejectRenewal,
-  onViewDocument
+  onViewDocument,
+  onUpdateResident,
+  onDeleteResident,
+  isUpdatingResident,
+  isDeletingResident
 }) => {
   const accountMeta = getResidentAccountMeta(resident);
   const hasPendingRenewal = resident?.renewalStatus === 'pending';
   const [approvalDate, setApprovalDate] = useState('');
   const [decisionNote, setDecisionNote] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState(buildResidentEditDraft(resident));
+  const isApartment = resident?.propertyType === 'apartment';
+  const addressPreview = formatResidentDraftAddress(editDraft, resident?.propertyType);
 
   useEffect(() => {
     setApprovalDate(
@@ -99,7 +168,24 @@ const ResidentDetailModal = ({
       formatDateInputValue(resident?.expiresAt)
     );
     setDecisionNote('');
+    setIsEditing(false);
+    setEditDraft(buildResidentEditDraft(resident));
   }, [resident?._id, resident?.requestedOccupancyEndDate, resident?.expiresAt]);
+
+  const handleDraftChange = (field, value) => {
+    setEditDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value
+    }));
+  };
+
+  const handleSaveResident = async () => {
+    const success = await onUpdateResident?.(resident._id, editDraft);
+
+    if (success) {
+      setIsEditing(false);
+    }
+  };
 
   return (
   <div className="document-viewer-overlay" onClick={onClose}>
@@ -134,20 +220,166 @@ const ResidentDetailModal = ({
       </div>
 
       <div className="resident-modal-body">
-        <div className="resident-modal-info-grid">
-          <div className="modal-info-item"><Mail size={15} /><div><span className="modal-info-label">Email</span><span className="modal-info-value">{resident.email}</span></div></div>
-          <div className="modal-info-item"><MapPin size={15} /><div><span className="modal-info-label">Address</span><span className="modal-info-value">{formatResidentAddress(resident)}</span></div></div>
-          <div className="modal-info-item"><Phone size={15} /><div><span className="modal-info-label">Phone</span><span className="modal-info-value">{resident.phoneNumber}</span></div></div>
-          <div className="modal-info-item"><Clock size={15} /><div><span className="modal-info-label">{isPending ? 'Applied' : 'Joined'}</span><span className="modal-info-value">{formatResidentDate(resident.createdAt, 'Unknown')}</span></div></div>
-          <div className="modal-info-item"><User size={15} /><div><span className="modal-info-label">Resident Type</span><span className="modal-info-value">{getResidentOccupancyLabel(resident)}</span></div></div>
-          <div className="modal-info-item"><CheckCircle size={15} /><div><span className="modal-info-label">Account Status</span><span className="modal-info-value"><span className={accountMeta.className}>{accountMeta.label}</span></span></div></div>
-          {resident?.occupancyType === 'renter' && (
-            <>
-              <div className="modal-info-item"><Calendar size={15} /><div><span className="modal-info-label">Occupancy Start</span><span className="modal-info-value">{formatResidentDate(resident.occupancyStartDate)}</span></div></div>
-              <div className="modal-info-item"><Calendar size={15} /><div><span className="modal-info-label">Account Expiry</span><span className="modal-info-value">{formatResidentExpiry(resident)}</span></div></div>
-            </>
-          )}
+        <div className="modal-account-toolbar">
+          <div>
+            <h4>Account Management</h4>
+            <p>Update resident contact details and household address without leaving this review panel.</p>
+          </div>
+          <div className="modal-account-toolbar-actions">
+            {isEditing ? (
+              <>
+                <button
+                  type="button"
+                  className="modal-secondary-btn"
+                  onClick={() => {
+                    setIsEditing(false);
+                    setEditDraft(buildResidentEditDraft(resident));
+                  }}
+                  disabled={isUpdatingResident}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn-approve"
+                  onClick={handleSaveResident}
+                  disabled={isUpdatingResident}
+                >
+                  <CheckCircle size={16} /> {isUpdatingResident ? 'Saving...' : 'Save Changes'}
+                </button>
+              </>
+            ) : (
+              <button type="button" className="modal-secondary-btn" onClick={() => setIsEditing(true)}>
+                Edit Account
+              </button>
+            )}
+            {!isPending && !isEditing && (
+              <button
+                type="button"
+                className="btn-reject"
+                onClick={() => onDeleteResident?.(resident._id)}
+                disabled={isDeletingResident}
+              >
+                <XCircle size={16} /> {isDeletingResident ? 'Deleting...' : 'Delete Account'}
+              </button>
+            )}
+          </div>
         </div>
+
+        {isEditing ? (
+          <div className="modal-edit-panel">
+            <div className="modal-edit-grid">
+              <div className="modal-field-group">
+                <label>Family Name</label>
+                <input
+                  type="text"
+                  value={editDraft.familyName}
+                  onChange={(event) => handleDraftChange('familyName', event.target.value)}
+                  className="modal-form-input"
+                  maxLength={20}
+                />
+              </div>
+              <div className="modal-field-group">
+                <label>Email Address</label>
+                <input
+                  type="email"
+                  value={editDraft.email}
+                  onChange={(event) => handleDraftChange('email', event.target.value)}
+                  className="modal-form-input"
+                />
+              </div>
+              <div className="modal-field-group">
+                <label>Phone Number</label>
+                <input
+                  type="text"
+                  value={editDraft.phoneNumber}
+                  onChange={(event) => handleDraftChange('phoneNumber', event.target.value)}
+                  className="modal-form-input"
+                />
+              </div>
+              <div className="modal-field-group">
+                <label>Street</label>
+                <input
+                  type="text"
+                  value={editDraft.street}
+                  onChange={(event) => handleDraftChange('street', event.target.value)}
+                  className="modal-form-input"
+                  maxLength={30}
+                />
+              </div>
+              <div className="modal-field-group">
+                <label>Block</label>
+                <input
+                  type="text"
+                  value={editDraft.block}
+                  onChange={(event) => handleDraftChange('block', event.target.value.replace(/[^0-9]/g, '').slice(0, 2))}
+                  className="modal-form-input"
+                />
+              </div>
+              <div className="modal-field-group">
+                <label>Lot</label>
+                <input
+                  type="text"
+                  value={editDraft.lot}
+                  onChange={(event) => handleDraftChange('lot', event.target.value.replace(/[^0-9]/g, '').slice(0, 2))}
+                  className="modal-form-input"
+                />
+              </div>
+              <div className="modal-field-group">
+                <label>Phase</label>
+                <input
+                  type="text"
+                  value={editDraft.phase}
+                  onChange={(event) => handleDraftChange('phase', event.target.value.replace(/[^0-9]/g, '').slice(0, 1))}
+                  className="modal-form-input"
+                />
+              </div>
+              {isApartment && (
+                <>
+                  <div className="modal-field-group">
+                    <label>Building Name</label>
+                    <input
+                      type="text"
+                      value={editDraft.buildingName}
+                      onChange={(event) => handleDraftChange('buildingName', event.target.value)}
+                      className="modal-form-input"
+                      maxLength={60}
+                    />
+                  </div>
+                  <div className="modal-field-group">
+                    <label>Unit Number</label>
+                    <input
+                      type="text"
+                      value={editDraft.unitNumber}
+                      onChange={(event) => handleDraftChange('unitNumber', event.target.value.toUpperCase())}
+                      className="modal-form-input"
+                      maxLength={20}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="modal-address-preview">
+              <span className="modal-info-label">Home Address Preview</span>
+              <strong>{addressPreview}</strong>
+            </div>
+          </div>
+        ) : (
+          <div className="resident-modal-info-grid">
+            <div className="modal-info-item"><Mail size={15} /><div><span className="modal-info-label">Email</span><span className="modal-info-value">{resident.email}</span></div></div>
+            <div className="modal-info-item"><MapPin size={15} /><div><span className="modal-info-label">Address</span><span className="modal-info-value">{formatResidentAddress(resident)}</span></div></div>
+            <div className="modal-info-item"><Phone size={15} /><div><span className="modal-info-label">Phone</span><span className="modal-info-value">{resident.phoneNumber}</span></div></div>
+            <div className="modal-info-item"><Clock size={15} /><div><span className="modal-info-label">{isPending ? 'Applied' : 'Joined'}</span><span className="modal-info-value">{formatResidentDate(resident.createdAt, 'Unknown')}</span></div></div>
+            <div className="modal-info-item"><User size={15} /><div><span className="modal-info-label">Resident Type</span><span className="modal-info-value">{getResidentOccupancyLabel(resident)}</span></div></div>
+            <div className="modal-info-item"><CheckCircle size={15} /><div><span className="modal-info-label">Account Status</span><span className="modal-info-value"><span className={accountMeta.className}>{accountMeta.label}</span></span></div></div>
+            {resident?.occupancyType === 'renter' && (
+              <>
+                <div className="modal-info-item"><Calendar size={15} /><div><span className="modal-info-label">Occupancy Start</span><span className="modal-info-value">{formatResidentDate(resident.occupancyStartDate)}</span></div></div>
+                <div className="modal-info-item"><Calendar size={15} /><div><span className="modal-info-label">Account Expiry</span><span className="modal-info-value">{formatResidentExpiry(resident)}</span></div></div>
+              </>
+            )}
+          </div>
+        )}
 
         {hasPendingRenewal && !isPending && (
           <div className="modal-renewal-panel">
@@ -349,6 +581,40 @@ const DocumentViewer = ({ resident, token, onClose }) => {
   );
 };
 
+const VehiclePhotoModal = ({ vehicle, onClose }) => {
+  const photoUrl = assetUrl(vehicle?.photo?.path || '');
+
+  return (
+    <div className="document-viewer-overlay" onClick={onClose}>
+      <div className="document-viewer-container" onClick={(event) => event.stopPropagation()}>
+        <div className="document-viewer-header">
+          <div><h3>Vehicle Photo</h3><p>{vehicle?.plateNumber} - {vehicle?.brand} {vehicle?.model}</p></div>
+          <div className="document-viewer-actions">
+            <a
+              href={photoUrl || '#'}
+              download={vehicle?.photo?.originalName || `${vehicle?.plateNumber || 'vehicle'}-photo`}
+              className="btn-download"
+              onClick={(event) => {
+                if (!photoUrl) {
+                  event.preventDefault();
+                }
+              }}
+            >
+              <Download size={18} /> Download
+            </a>
+            <button onClick={onClose} className="btn-close-viewer"><X size={20} /></button>
+          </div>
+        </div>
+        <div className="document-viewer-content">
+          {photoUrl
+            ? <img src={photoUrl} alt={`${vehicle?.plateNumber || 'Vehicle'} registration`} className="document-viewer-image" />
+            : <div className="document-viewer-message document-viewer-error"><AlertCircle size={28} /><p>No vehicle photo is attached to this record.</p></div>}
+        </div>
+      </div>
+    </div>
+  );
+};
+
   const ScrollableTableWrapper = ({ children }) => {
     const scrollRef = useRef(null);
     const dragRef = useRef({
@@ -440,13 +706,16 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const [recentActivity, setRecentActivity]     = useState([]);
   const [dashboardAnnouncements, setDashboardAnnouncements] = useState([]);
   const [allVisitors, setAllVisitors]           = useState([]);
+  const [preRegisteredVisitors, setPreRegisteredVisitors] = useState([]);
   const [allDeliveries, setAllDeliveries]       = useState([]);
   const [loading, setLoading]                   = useState(false);
   const [showAllResidents, setShowAllResidents] = useState(false);
   const [viewingDocument, setViewingDocument]   = useState(null);
+  const [viewingVisitorIdentification, setViewingVisitorIdentification] = useState(null);
   const [residentViewMode, setResidentViewMode] = useState('card');
   const [viewingResident, setViewingResident]   = useState(null);
   const [viewingFamilyMembers, setViewingFamilyMembers] = useState(null);
+  const [viewingVehicle, setViewingVehicle] = useState(null);
   const [allVehicles, setAllVehicles]           = useState([]);
   const [pendingResidentsPage, setPendingResidentsPage] = useState(1);
   const [approvedResidentsPage, setApprovedResidentsPage] = useState(1);
@@ -457,10 +726,17 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const [vehicleViewMode, setVehicleViewMode]   = useState('card');
   const [vehicleSearchQuery, setVehicleSearchQuery]   = useState('');
   const [residentSearchQuery, setResidentSearchQuery] = useState('');
+  const [residentSortOption, setResidentSortOption] = useState('newest');
   const [visitorSearchQuery, setVisitorSearchQuery]   = useState('');
+  const [preRegisteredSearchQuery, setPreRegisteredSearchQuery] = useState('');
   const [visitorViewMode, setVisitorViewMode]   = useState('card');
+  const [preRegisteredViewMode, setPreRegisteredViewMode] = useState('card');
   const [visitorLogsPage, setVisitorLogsPage] = useState(1);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [residentLoadingCount, setResidentLoadingCount] = useState(0);
+  const [residentMutation, setResidentMutation] = useState({ id: '', action: '' });
+  const lastTrackedModuleRef = useRef('');
+  const residentLoading = residentLoadingCount > 0;
 
   const [sessionUser, setSessionUser] = useState(() => JSON.parse(localStorage.getItem('user') || '{}'));
   const user = sessionUser;
@@ -470,6 +746,12 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
     [user]
   );
   const userRoleLabel = getUserRoleLabel(user);
+  const beginResidentLoading = useCallback(() => {
+    setResidentLoadingCount((currentCount) => currentCount + 1);
+  }, []);
+  const endResidentLoading = useCallback(() => {
+    setResidentLoadingCount((currentCount) => Math.max(0, currentCount - 1));
+  }, []);
 
   const syncCurrentUser = useCallback(async () => {
     if (!token) return;
@@ -611,7 +893,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
       const visitors   = await visitorsRes.json();
       const deliveries = await deliveriesRes.json();
       const activities = [];
-      if (Array.isArray(entryLogs))  entryLogs.slice(0,10).forEach(log => activities.push({ text: `Vehicle ${log.plateNumber} ${log.logType === 'entry' ? 'entered' : 'exited'} (${log.vehicleOwnerType || 'resident'})`, time: formatTimeAgo(new Date(log.timestamp)), color: log.logType === 'entry' ? 'bg-green-50' : 'bg-blue-50', dotColor: log.logType === 'entry' ? '#10b981' : '#3b82f6', timestamp: new Date(log.timestamp) }));
+      if (Array.isArray(entryLogs))  entryLogs.slice(0,10).forEach(log => activities.push({ text: log.notes || `Vehicle ${log.plateNumber} ${log.logType === 'entry' ? 'entered' : 'exited'} (${log.vehicleOwnerType || 'resident'})`, time: formatTimeAgo(new Date(log.timestamp)), color: log.logType === 'entry' ? 'bg-green-50' : 'bg-blue-50', dotColor: log.logType === 'entry' ? '#10b981' : '#3b82f6', timestamp: new Date(log.timestamp) }));
       if (Array.isArray(visitors))   visitors.slice(0,10).forEach(visitor => { activities.push({ text: `Visitor ${visitor.name} registered (visiting ${visitor.hostResidentName})`, time: formatTimeAgo(new Date(visitor.entryTime)), color: 'bg-purple-50', dotColor: '#8b5cf6', timestamp: new Date(visitor.entryTime) }); if (visitor.status === 'exited' && visitor.exitTime) activities.push({ text: `Visitor ${visitor.name} exited`, time: formatTimeAgo(new Date(visitor.exitTime)), color: 'bg-orange-50', dotColor: '#f97316', timestamp: new Date(visitor.exitTime) }); });
       if (Array.isArray(deliveries)) deliveries.slice(0,10).forEach(delivery => { activities.push({ text: `Delivery by ${delivery.driverName} to ${delivery.hostResidentAddress}`, time: formatTimeAgo(new Date(delivery.entryTime)), color: 'bg-cyan-50', dotColor: '#06b6d4', timestamp: new Date(delivery.entryTime) }); if (delivery.status === 'exited' && delivery.exitTime) activities.push({ text: `Delivery by ${delivery.driverName} completed`, time: formatTimeAgo(new Date(delivery.exitTime)), color: 'bg-orange-50', dotColor: '#f97316', timestamp: new Date(delivery.exitTime) }); });
       activities.sort((a, b) => b.timestamp - a.timestamp);
@@ -644,28 +926,50 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
   };
 
   const fetchPendingResidents = useCallback(async () => {
-    setLoading(true);
+    beginResidentLoading();
     try {
-      const response = await fetch(apiUrl(buildPaginatedUrl('/residents/pending', pendingResidentsPage)), { headers: { Authorization: `Bearer ${token}` } });
+      const response = await fetch(
+        apiUrl(buildPaginatedUrl('/residents/pending', pendingResidentsPage, {
+          q: residentSearchQuery.trim(),
+          sort: residentSortOption
+        })),
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
       const data = await response.json();
       const parsed = parsePaginatedResponse(data);
       setPendingResidents(parsed.items);
       setPendingResidentsPagination(parsed.pagination);
-      setStats(prev => ({ ...prev, pendingApprovals: parsed.pagination?.total ?? parsed.items.length }));
-    } catch (error) { console.error('Error fetching pending:', error); }
-    setLoading(false);
-  }, [pendingResidentsPage, token]);
+    } catch (error) {
+      console.error('Error fetching pending:', error);
+      setPendingResidents([]);
+      setPendingResidentsPagination(null);
+    } finally {
+      endResidentLoading();
+    }
+  }, [beginResidentLoading, endResidentLoading, pendingResidentsPage, residentSearchQuery, residentSortOption, token]);
 
   const fetchAllResidents = useCallback(async () => {
     try {
-      const response = await fetch(apiUrl(buildPaginatedUrl('/residents/approved', approvedResidentsPage)), { headers: { Authorization: `Bearer ${token}` } });
+      beginResidentLoading();
+      const response = await fetch(
+        apiUrl(buildPaginatedUrl('/residents/approved', approvedResidentsPage, {
+          q: residentSearchQuery.trim(),
+          sort: residentSortOption
+        })),
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
       const data = await response.json();
       const parsed = parsePaginatedResponse(data);
       setAllResidents(parsed.items);
       setApprovedResidentsPagination(parsed.pagination);
-      setStats(prev => ({ ...prev, totalResidents: parsed.pagination?.total ?? parsed.items.length }));
-    } catch (error) { console.error('Error fetching residents:', error); }
-  }, [approvedResidentsPage, token]);
+    } catch (error) {
+      console.error('Error fetching residents:', error);
+      setAllResidents([]);
+      setApprovedResidentsPagination(null);
+    } finally {
+      endResidentLoading();
+    }
+  }, [approvedResidentsPage, beginResidentLoading, endResidentLoading, residentSearchQuery, residentSortOption, token]);
 
   const fetchAllVehicles = useCallback(async () => {
     setLoading(true);
@@ -689,6 +993,16 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
     setLoading(false);
   }, [token]);
 
+  const fetchPreRegisteredVisitors = useCallback(async () => {
+    try {
+      const response = await fetch(apiUrl('/visitors/pre-registered'), { headers: { Authorization: `Bearer ${token}` } });
+      const data = await response.json();
+      setPreRegisteredVisitors(Array.isArray(data) ? data : []);
+    } catch (error) {
+      setPreRegisteredVisitors([]);
+    }
+  }, [token]);
+
   const fetchAllDeliveries = useCallback(async () => {
     try {
       const response = await fetch(apiUrl('/deliveries'), { headers: { Authorization: `Bearer ${token}` } });
@@ -696,6 +1010,46 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
       setAllDeliveries(Array.isArray(data) ? data : []);
     } catch (error) { setAllDeliveries([]); }
   }, [token]);
+
+  const openVisitorIdentification = async (visitor) => {
+    if (!visitor?.identificationDocument?.path) {
+      showAlert('No visitor identification is attached to this record.', 'error');
+      return;
+    }
+
+    setViewingVisitorIdentification(visitor);
+  };
+
+  const reviewPreRegisteredVisitor = (visitor, decision, qrEntryEnabled = false) => {
+    const actionLabel = decision === 'approved'
+      ? qrEntryEnabled ? 'approve this visitor for QR entry' : 'approve this visitor'
+      : 'reject this visitor';
+
+    showConfirm(`Are you sure you want to ${actionLabel}?`, async () => {
+      try {
+        const response = await fetch(apiUrl(`/visitors/${visitor._id}/review`), {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ decision, qrEntryEnabled })
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          showAlert(data.message || 'Failed to review pre-registered visitor.', 'error');
+          return;
+        }
+
+        showAlert(data.message || 'Pre-registered visitor reviewed.', 'success');
+        fetchPreRegisteredVisitors();
+        fetchAllVisitors();
+      } catch (error) {
+        showAlert('Failed to review pre-registered visitor.', 'error');
+      }
+    });
+  };
 
   useEffect(() => {
     fetchAllStats();
@@ -709,7 +1063,8 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
     if      (activeModule === 'residents') { fetchPendingResidents(); fetchAllResidents(); }
     else if (activeModule === 'vehicles')  { fetchAllVehicles(); }
     else if (activeModule === 'visitors')  { fetchAllVisitors(); fetchAllDeliveries(); }
-  }, [activeModule, fetchPendingResidents, fetchAllResidents, fetchAllVehicles, fetchAllVisitors, fetchAllDeliveries]);
+    else if (activeModule === 'pre-registered') { fetchPreRegisteredVisitors(); }
+  }, [activeModule, fetchPendingResidents, fetchAllResidents, fetchAllVehicles, fetchAllVisitors, fetchPreRegisteredVisitors, fetchAllDeliveries]);
 
   useEffect(() => {
     setVisitorLogsPage(1);
@@ -726,11 +1081,77 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
     showConfirm('Are you sure you want to reject this resident?', async () => {
       try {
         const response = await fetch(apiUrl(`/residents/${id}`), { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+        const data = await response.json().catch(() => ({}));
         if (response.ok) {
           fetchPendingResidents(); fetchAllResidents(); fetchAllStats(); setViewingResident(null);
-          showAlert('Resident rejected successfully.', 'success');
+          showAlert(data.message || 'Resident rejected successfully.', 'success');
+          return;
         }
+        showAlert(data.message || 'Failed to reject resident.', 'error');
       } catch (error) { console.error('Error rejecting:', error); showAlert('Failed to reject resident.', 'error'); }
+    });
+  };
+
+  const updateResidentAccount = async (id, payload = {}) => {
+    setResidentMutation({ id, action: 'update' });
+
+    try {
+      const response = await fetch(apiUrl(`/residents/${id}`), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        showAlert(data.message || 'Failed to update resident account.', 'error');
+        return false;
+      }
+
+      fetchPendingResidents();
+      fetchAllResidents();
+      setViewingResident(data.resident || null);
+      showAlert(data.message || 'Resident account updated successfully.', 'success');
+      return true;
+    } catch (error) {
+      console.error('Error updating resident:', error);
+      showAlert('Failed to update resident account.', 'error');
+      return false;
+    } finally {
+      setResidentMutation({ id: '', action: '' });
+    }
+  };
+
+  const deleteResidentAccount = async (id) => {
+    showConfirm('Move this resident account to recently deleted accounts?', async () => {
+      setResidentMutation({ id, action: 'delete' });
+
+      try {
+        const response = await fetch(apiUrl(`/residents/${id}`), {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          showAlert(data.message || 'Failed to delete resident account.', 'error');
+          return;
+        }
+
+        fetchPendingResidents();
+        fetchAllResidents();
+        fetchAllStats();
+        setViewingResident(null);
+        showAlert(data.message || 'Resident account moved to recently deleted accounts.', 'success');
+      } catch (error) {
+        console.error('Error deleting resident:', error);
+        showAlert('Failed to delete resident account.', 'error');
+      } finally {
+        setResidentMutation({ id: '', action: '' });
+      }
     });
   };
 
@@ -807,6 +1228,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
     { id: 'residents',       icon: Users,       label: 'Resident Management', permission: 'residents' },
     { id: 'vehicles',        icon: Car,         label: 'Vehicle Management', permission: 'vehicles' },
     { id: 'visitors',        icon: UserCheck,   label: 'Visitor Logs', permission: 'visitors' },
+    { id: 'pre-registered',  icon: QrCode,      label: 'Pre-Registered Visitors', permission: 'visitors' },
     { id: 'facilities',      icon: Calendar,    label: 'Facility Reservations', permission: 'facilities' },
     { id: 'complaints',      icon: AlertCircle, label: 'Complaints', permission: 'complaints' },
     { id: 'announcements',   icon: Bell,        label: 'Announcements', permission: 'announcements' },
@@ -814,10 +1236,11 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
     { id: 'cctv',            icon: Camera,      label: 'CCTV Feeds', permission: 'cctv' },
     { id: 'billing',         icon: PesoIcon,    label: 'Billing & Payments', permission: 'billing' },
     { id: 'bill_audit_logs', icon: Receipt,     label: 'Admin Bills Audit/Logs', permission: 'bill_audit_logs' },
+    { id: 'audit_logs',      icon: History,     label: 'Audit Logs', permission: 'audit_logs' },
     { id: 'documents',       icon: FileText,    label: 'Resident Documents', permission: 'documents' },
     { id: 'analytics',       icon: BarChart3,   label: 'AI Analytics', permission: 'analytics' },
     { id: 'ai_chatbot',      icon: Bot,         label: 'AI Chatbot', permission: 'ai_chatbot' },
-    { id: 'subdivision_map', icon: MapIcon,     label: '3D Mapped Subdivision', permission: 'subdivision_map' },
+    { id: 'subdivision_map', icon: MapIcon,     label: SUBDIVISION_MAP_MODULE.label, permission: 'subdivision_map' },
     { id: 'reports',         icon: FileText,    label: 'Reports', permission: 'reports' },
     { id: 'manage_accounts', icon: Shield,      label: 'Manage Accounts', permission: 'manage_accounts' }
   ];
@@ -829,6 +1252,31 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
       setActiveModule(menuItems[0]?.id || 'overview');
     }
   }, [activeModule, menuItems]);
+
+  useEffect(() => {
+    const trackedModuleKey = activeModule === 'pre-registered' ? 'visitors' : activeModule;
+
+    if (!token || !activeModule || !hasAdminModuleAccess(user, trackedModuleKey)) {
+      return;
+    }
+
+    if (lastTrackedModuleRef.current === activeModule) {
+      return;
+    }
+
+    lastTrackedModuleRef.current = activeModule;
+
+    fetch(apiUrl('/admin-audit-logs/module-access'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ moduleKey: trackedModuleKey })
+    }).catch((error) => {
+      console.error('Failed to record module access:', error);
+    });
+  }, [activeModule, token, user]);
 
   // ── Small Components ─────────────────────────────────────────────
   const StatCard = ({ title, value, icon: Icon, borderColor, iconBg, iconColor, trend }) => (
@@ -862,6 +1310,13 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
     <div className="view-toggle-group">
       <button className={`view-toggle-btn ${visitorViewMode === 'card'  ? 'active' : ''}`} onClick={() => setVisitorViewMode('card')}><LayoutGrid size={16} /><span>Cards</span></button>
       <button className={`view-toggle-btn ${visitorViewMode === 'table' ? 'active' : ''}`} onClick={() => setVisitorViewMode('table')}><Table2 size={16} /><span>Table</span></button>
+    </div>
+  );
+
+  const PreRegisteredViewToggle = () => (
+    <div className="view-toggle-group">
+      <button className={`view-toggle-btn ${preRegisteredViewMode === 'card'  ? 'active' : ''}`} onClick={() => setPreRegisteredViewMode('card')}><LayoutGrid size={16} /><span>Cards</span></button>
+      <button className={`view-toggle-btn ${preRegisteredViewMode === 'table' ? 'active' : ''}`} onClick={() => setPreRegisteredViewMode('table')}><Table2 size={16} /><span>Table</span></button>
     </div>
   );
 
@@ -950,7 +1405,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
     <ScrollableTableWrapper>
       <table className="residents-table">
         <thead>
-          <tr><th>Plate Number</th><th>Brand & Model</th><th>Type</th><th>Color</th><th>Owner</th><th>Address</th><th>Phone</th><th>Registered</th></tr>
+          <tr><th>Plate Number</th><th>Brand & Model</th><th>Type</th><th>Color</th><th>Owner</th><th>Address</th><th>Phone</th><th>Photo</th><th>Registered</th></tr>
         </thead>
         <tbody>
           {vehicles.map((vehicle, idx) => (
@@ -962,6 +1417,13 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
               <td><span className="table-family-name">{vehicle.ownerName}</span></td>
               <td className="table-address">{vehicle.ownerAddress}</td>
               <td>{vehicle.ownerPhone}</td>
+              <td onClick={(event) => event.stopPropagation()}>
+                {vehicle.photo?.path ? (
+                  <button onClick={() => setViewingVehicle(vehicle)} className="btn-view-document btn-view-document-sm"><Eye size={14} /> View</button>
+                ) : (
+                  <span className="table-empty">-</span>
+                )}
+              </td>
               <td>{new Date(vehicle.registeredDate).toLocaleDateString()}</td>
             </tr>
           ))}
@@ -1168,29 +1630,11 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
   };
 
   const ResidentManagementContent = () => {
-    const q = residentSearchQuery.toLowerCase();
-    const filteredPending = pendingResidents.filter((resident) =>
-      (resident.familyName || '').toLowerCase().includes(q) ||
-      (resident.username || '').toLowerCase().includes(q) ||
-      (resident.email || '').toLowerCase().includes(q) ||
-      (resident.houseAddress || '').toLowerCase().includes(q) ||
-      (resident.street || '').toLowerCase().includes(q) ||
-      (resident.phoneNumber || '').toLowerCase().includes(q) ||
-      getResidentOccupancyLabel(resident).toLowerCase().includes(q)
-    );
-    const filteredApproved = allResidents.filter((resident) =>
-      (resident.familyName || '').toLowerCase().includes(q) ||
-      (resident.username || '').toLowerCase().includes(q) ||
-      (resident.email || '').toLowerCase().includes(q) ||
-      (resident.houseAddress || '').toLowerCase().includes(q) ||
-      (resident.street || '').toLowerCase().includes(q) ||
-      (resident.phoneNumber || '').toLowerCase().includes(q) ||
-      getResidentOccupancyLabel(resident).toLowerCase().includes(q)
-    );
-    const renewalPendingCount = filteredApproved.filter((resident) => resident.renewalStatus === 'pending').length;
-    const expiringSoonCount = filteredApproved.filter((resident) => resident.accountStatus === 'expiring_soon').length;
-    const expiredCount = filteredApproved.filter((resident) => resident.accountStatus === 'expired').length;
-    const pendingRentersCount = filteredPending.filter((resident) => resident.occupancyType === 'renter').length;
+    const residentSearchActive = Boolean(residentSearchQuery.trim());
+    const renewalPendingCount = allResidents.filter((resident) => resident.renewalStatus === 'pending').length;
+    const expiringSoonCount = allResidents.filter((resident) => resident.accountStatus === 'expiring_soon').length;
+    const expiredCount = allResidents.filter((resident) => resident.accountStatus === 'expired').length;
+    const pendingRentersCount = pendingResidents.filter((resident) => resident.occupancyType === 'renter').length;
 
     return (
       <div>
@@ -1207,22 +1651,54 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
           </div>
         </div>
 
-        <div className="search-input-group" style={{ marginBottom: '1.5rem' }}>
-          <Search size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#9ca3af' }} />
-          <input type="text" value={residentSearchQuery} onChange={e => setResidentSearchQuery(e.target.value)} placeholder="Search by name, username, email, address, or phone..." className="search-input" style={{ paddingLeft: '3rem' }} />
+        <div className="resident-toolbar">
+          <div className="search-input-group" style={{ marginBottom: 0 }}>
+            <Search size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#9ca3af' }} />
+            <input
+              type="text"
+              value={residentSearchQuery}
+              onChange={(event) => {
+                setPendingResidentsPage(1);
+                setApprovedResidentsPage(1);
+                setResidentSearchQuery(event.target.value);
+              }}
+              placeholder="Search by name, username, email, address, or phone..."
+              className="search-input"
+              style={{ paddingLeft: '3rem' }}
+            />
+          </div>
+          <div className="resident-sort-group">
+            <label htmlFor="resident-sort-select">Sort By</label>
+            <select
+              id="resident-sort-select"
+              value={residentSortOption}
+              onChange={(event) => {
+                setPendingResidentsPage(1);
+                setApprovedResidentsPage(1);
+                setResidentSortOption(event.target.value);
+              }}
+              className="resident-sort-select"
+            >
+              {RESIDENT_SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {showAllResidents ? (
-          loading
+          residentLoading
             ? <div className="loading-container"><div className="spinner"></div><p className="loading-text">Loading residents...</p></div>
             : allResidents.length === 0
-              ? <div className="empty-state"><div className="empty-icon"><Users size={40} style={{ color: '#9ca3af' }} /></div><h3>No Residents Yet</h3><p>There are no approved residents at the moment.</p></div>
+              ? <div className="empty-state"><div className="empty-icon"><Users size={40} style={{ color: '#9ca3af' }} /></div><h3>{residentSearchActive ? 'No Residents Found' : 'No Residents Yet'}</h3><p>{residentSearchActive ? 'No approved residents match the current search.' : 'There are no approved residents at the moment.'}</p></div>
               : <>
                   <div className="residents-count-bar">
-                    <div><h3>Total Approved Residents</h3><p>Monitor resident status, renter expiries, and renewal requests.</p></div>
+                    <div><h3>{residentSearchActive ? 'Approved Resident Search Results' : 'Total Approved Residents'}</h3><p>{residentSearchActive ? 'Search now checks the entire resident dataset before pagination is applied.' : 'Monitor resident status, renter expiries, and renewal requests.'}</p></div>
                     <div className="residents-count-bar-right">
                       <div className="residents-count-meta">
-                        <span className="resident-summary-chip">Showing {filteredApproved.length}</span>
+                        <span className="resident-summary-chip">Page results {allResidents.length}</span>
                         {renewalPendingCount > 0 && <span className="resident-summary-chip attention">{renewalPendingCount} renewal pending</span>}
                         {expiringSoonCount > 0 && <span className="resident-summary-chip warning">{expiringSoonCount} expiring soon</span>}
                         {expiredCount > 0 && <span className="resident-summary-chip danger">{expiredCount} expired</span>}
@@ -1231,7 +1707,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
                     </div>
                   </div>
                   {residentViewMode === 'card'
-                    ? <div className="residents-grid">{filteredApproved.map(r => {
+                    ? <div className="residents-grid">{allResidents.map(r => {
                         const accountMeta = getResidentAccountMeta(r);
 
                         return (
@@ -1255,27 +1731,27 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
                           </div>
                         );
                       })}</div>
-                    : renderApprovedResidentsTable(filteredApproved)}
+                    : renderApprovedResidentsTable(allResidents)}
                   <PaginationControls pagination={approvedResidentsPagination} onPageChange={setApprovedResidentsPage} />
                 </>
         ) : (
-          loading
+          residentLoading
             ? <div className="loading-container"><div className="spinner"></div><p className="loading-text">Loading pending approvals...</p></div>
             : pendingResidents.length === 0
-              ? <div className="empty-state"><div className="empty-icon"><CheckCircle size={40} style={{ color: '#9ca3af' }} /></div><h3>All Caught Up!</h3><p>No pending resident approvals at the moment.</p></div>
+              ? <div className="empty-state"><div className="empty-icon"><CheckCircle size={40} style={{ color: '#9ca3af' }} /></div><h3>{residentSearchActive ? 'No Pending Matches' : 'All Caught Up!'}</h3><p>{residentSearchActive ? 'No pending residents match the current search.' : 'No pending resident approvals at the moment.'}</p></div>
               : <>
                   <div className="residents-count-bar">
-                    <div><h3>Pending Resident Approvals</h3><p>Review new household registrations before they can access the portal.</p></div>
+                    <div><h3>{residentSearchActive ? 'Pending Resident Search Results' : 'Pending Resident Approvals'}</h3><p>{residentSearchActive ? 'Search now checks every pending applicant before paginating the results.' : 'Review new household registrations before they can access the portal.'}</p></div>
                     <div className="residents-count-bar-right">
                       <div className="residents-count-meta">
-                        <span className="resident-summary-chip">Showing {filteredPending.length}</span>
+                        <span className="resident-summary-chip">Page results {pendingResidents.length}</span>
                         {pendingRentersCount > 0 && <span className="resident-summary-chip warning">{pendingRentersCount} renter applicants</span>}
                       </div>
                       <div className="residents-count-number">{pendingResidentsPagination?.total ?? pendingResidents.length}</div>
                     </div>
                   </div>
                   {residentViewMode === 'card'
-                    ? <div className="residents-grid">{filteredPending.map(r => (
+                    ? <div className="residents-grid">{pendingResidents.map(r => (
                         <div key={r._id} className="resident-card resident-card-clickable resident-card-pending" onClick={() => setViewingResident(r)}>
                           <div className="pending-badge-top">Pending Approval</div>
                           <div className="card-summary-static">
@@ -1291,7 +1767,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
                           <div className="card-click-hint">Click to review &amp; approve</div>
                         </div>
                       ))}</div>
-                    : renderPendingResidentsTable(filteredPending)}
+                    : renderPendingResidentsTable(pendingResidents)}
                   <PaginationControls pagination={pendingResidentsPagination} onPageChange={setPendingResidentsPage} />
                 </>
         )}
@@ -1307,6 +1783,10 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
             onApproveRenewal={approveResidentRenewal}
             onRejectRenewal={rejectResidentRenewal}
             onViewDocument={setViewingDocument}
+            onUpdateResident={updateResidentAccount}
+            onDeleteResident={deleteResidentAccount}
+            isUpdatingResident={residentMutation.id === viewingResident._id && residentMutation.action === 'update'}
+            isDeletingResident={residentMutation.id === viewingResident._id && residentMutation.action === 'delete'}
           />
         )}
         {viewingDocument && (
@@ -1314,6 +1794,9 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
         )}
         {viewingFamilyMembers && (
           <FamilyMembersModal resident={viewingFamilyMembers} onClose={() => setViewingFamilyMembers(null)} />
+        )}
+        {viewingVehicle && (
+          <VehiclePhotoModal vehicle={viewingVehicle} onClose={() => setViewingVehicle(null)} />
         )}
       </div>
     );
@@ -1360,6 +1843,11 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
                             <div className="vehicle-detail"><span className="detail-label">Phone:</span><span className="detail-value">{vehicle.ownerPhone}</span></div>
                             <div className="vehicle-detail"><span className="detail-label">Registered:</span><span className="detail-value">{new Date(vehicle.registeredDate).toLocaleDateString()}</span></div>
                           </div>
+                          {vehicle.photo?.path && (
+                            <button className="btn-view-document" onClick={() => setViewingVehicle(vehicle)}>
+                              <Eye size={16} /> View Uploaded Photo
+                            </button>
+                          )}
                         </div>
                       ))}</div>
                     : renderVehiclesTable(filteredVehicles)}
@@ -1446,6 +1934,196 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
     );
   };
 
+  const PreRegisteredVisitorsContent = () => {
+    const q = preRegisteredSearchQuery.toLowerCase();
+    const filteredPreRegistered = preRegisteredVisitors.filter((item) =>
+      (item.name || '').toLowerCase().includes(q) ||
+      (item.hostResidentName || '').toLowerCase().includes(q) ||
+      (item.vehiclePlateNumber || '').toLowerCase().includes(q)
+    );
+    const pendingCount = filteredPreRegistered.filter((item) => item.reviewStatus === 'pending').length;
+
+    return (
+      <div>
+        <div className="page-header">
+          <div className="page-title">
+            <h2>Pre-Registered Visitors</h2>
+            <p>Review visitor identification and enable QR entry before guards process arrivals.</p>
+          </div>
+        </div>
+        <div className="search-section">
+          <div className="search-input-group" style={{ marginBottom: '1.5rem' }}>
+            <Search size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#9ca3af' }} />
+            <input
+              type="text"
+              value={preRegisteredSearchQuery}
+              onChange={(event) => setPreRegisteredSearchQuery(event.target.value)}
+              placeholder="Search by name, host, or plate number..."
+              className="search-input"
+              style={{ paddingLeft: '3rem' }}
+            />
+          </div>
+          <div className="residents-count-bar">
+            <div>
+              <h3>Review Queue</h3>
+              <p>{pendingCount} pending approval, {filteredPreRegistered.length - pendingCount} already reviewed.</p>
+            </div>
+            <div className="residents-count-bar-right">
+              <PreRegisteredViewToggle />
+              <div className="residents-count-number">{filteredPreRegistered.length}</div>
+            </div>
+          </div>
+          {loading ? (
+            <div className="loading-container"><div className="spinner"></div><p className="loading-text">Loading pre-registered visitors...</p></div>
+          ) : filteredPreRegistered.length === 0 ? (
+            <div className="empty-state"><div className="empty-icon"><QrCode size={40} style={{ color: '#9ca3af' }} /></div><h3>No Pre-Registered Visitors</h3><p>{preRegisteredSearchQuery ? 'Try a different search term' : 'No visitors are waiting for review right now'}</p></div>
+          ) : preRegisteredViewMode === 'table' ? (
+            <div className="module-table-card">
+              <div className="module-table-wrap">
+                <table className="module-table">
+                  <thead>
+                    <tr>
+                      <th>Visitor</th>
+                      <th>Host / Purpose</th>
+                      <th>Schedule</th>
+                      <th>Status</th>
+                      <th>QR Details</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredPreRegistered.map((visitor) => (
+                      <tr key={visitor._id}>
+                        <td>
+                          <span className="module-table__primary">{visitor.name}</span>
+                          <span className="module-table__secondary">
+                            {visitor.relationshipToResident || 'Relationship not set'} · Party size: {getVisitorPartySize(visitor)}
+                          </span>
+                        </td>
+                        <td>
+                          <span className="module-table__primary">{visitor.hostResidentName}</span>
+                          <span className="module-table__secondary">{visitor.purpose}</span>
+                        </td>
+                        <td>
+                          <span className="module-table__primary">{visitor.expectedDate ? new Date(visitor.expectedDate).toLocaleString() : 'Any time'}</span>
+                          <span className="module-table__secondary">
+                            {visitor.vehiclePlateNumber ? `${visitor.vehiclePlateNumber} (${visitor.vehicleType || 'N/A'})` : 'No vehicle registered'}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`module-table__pill ${visitor.reviewStatus === 'pending' ? 'pending' : isQrManagedVisitor(visitor) ? 'info' : visitor.status === 'inside' ? 'success' : 'approved'}`}>
+                            {visitor.reviewStatus === 'pending' ? 'Pending' : isQrManagedVisitor(visitor) ? 'QR Approved' : visitor.status === 'inside' ? 'Inside' : 'Approved'}
+                          </span>
+                          {visitor.reviewStatus === 'approved' && (
+                            <span className="module-table__secondary">
+                              Reviewed by {visitor.reviewedByName || 'Admin'}
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          {isQrManagedVisitor(visitor) && (visitor.qrManualCode || visitor.qrToken) ? (
+                            <>
+                              <span className="module-table__code">{formatVisitorAccessCode(visitor.qrManualCode || visitor.qrToken)}</span>
+                              <span className="module-table__secondary">Short code for QR fallback</span>
+                            </>
+                          ) : (
+                            <span className="module-table__empty">No QR approval yet</span>
+                          )}
+                        </td>
+                        <td>
+                          <div className="module-table__actions">
+                            {visitor.identificationDocument?.path && (
+                              <button type="button" onClick={() => openVisitorIdentification(visitor)} className="module-table__action-btn secondary">
+                                <Eye size={14} /> View ID
+                              </button>
+                            )}
+                            {visitor.reviewStatus === 'pending' && (
+                              <>
+                                <button type="button" onClick={() => reviewPreRegisteredVisitor(visitor, 'approved', false)} className="module-table__action-btn success">
+                                  <CheckCircle size={14} /> Approve
+                                </button>
+                                <button type="button" onClick={() => reviewPreRegisteredVisitor(visitor, 'approved', true)} className="module-table__action-btn info">
+                                  <QrCode size={14} /> Approve QR
+                                </button>
+                                <button type="button" onClick={() => reviewPreRegisteredVisitor(visitor, 'rejected', false)} className="module-table__action-btn danger">
+                                  <XCircle size={14} /> Reject
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="visitor-logs-grid">
+              {filteredPreRegistered.map((visitor) => (
+                <div key={visitor._id} className="visitor-log-card">
+                  <div className="visitor-log-header">
+                    <div>
+                      <h3>{visitor.name}</h3>
+                      <p className="visitor-log-type"><Calendar size={14} /> {visitor.reviewStatus === 'pending' ? 'Pending Review' : 'Review Complete'}</p>
+                    </div>
+                    <span className={`status-badge ${visitor.reviewStatus === 'approved' ? 'status-inside' : ''}`} style={visitor.reviewStatus === 'pending' ? { background: '#fef3c7', color: '#b45309' } : undefined}>
+                      {isQrManagedVisitor(visitor) ? 'QR Approved' : visitor.reviewStatus === 'pending' ? 'Pending' : visitor.status === 'inside' ? 'Inside Subdivision' : 'Approved'}
+                    </span>
+                  </div>
+                  <div className="visitor-log-details">
+                    <div className="visitor-log-detail"><User size={14} /><span>Host: {visitor.hostResidentName}</span></div>
+                    <div className="visitor-log-detail"><Users size={14} /><span>Relationship: {visitor.relationshipToResident || 'Not set'}</span></div>
+                    <div className="visitor-log-detail"><FileText size={14} /><span>Purpose: {visitor.purpose}</span></div>
+                    <div className="visitor-log-detail"><Clock size={14} /><span>Expected: {visitor.expectedDate ? new Date(visitor.expectedDate).toLocaleString() : 'Any time'}</span></div>
+                    <div className="visitor-log-detail"><QrCode size={14} /><span>Party Size: {getVisitorPartySize(visitor)} person{getVisitorPartySize(visitor) > 1 ? 's' : ''}</span></div>
+                    {visitor.vehiclePlateNumber && <div className="visitor-log-detail"><Car size={14} /><span>{visitor.vehiclePlateNumber} ({visitor.vehicleType || 'N/A'})</span></div>}
+                  </div>
+                  {Array.isArray(visitor.accompanyingVisitors) && visitor.accompanyingVisitors.length > 0 && (
+                    <div className="pre-reg-companion-review">
+                      <div className="pre-reg-companion-title">Companions</div>
+                      {visitor.accompanyingVisitors.map((companion, index) => (
+                        <div key={index} className="pre-reg-companion-item">
+                          <strong>{companion.firstName} {companion.lastName}</strong>
+                          <span>{companion.relationshipToResident}</span>
+                          <span>ID: {companion.identification}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {isQrManagedVisitor(visitor) && (visitor.qrManualCode || visitor.qrToken) && (
+                    <div className="admin-visitor-code-card">
+                      <span className="admin-visitor-code-label">Visitor Code</span>
+                      <strong>{formatVisitorAccessCode(visitor.qrManualCode || visitor.qrToken)}</strong>
+                      <p>Residents and guards can use this short code whenever QR camera scanning is unavailable.</p>
+                    </div>
+                  )}
+                  {visitor.reviewStatus === 'approved' && (
+                    <div className="admin-review-note">
+                      Reviewed by {visitor.reviewedByName || 'Admin'}{visitor.reviewedAt ? ` on ${new Date(visitor.reviewedAt).toLocaleString()}` : ''}.
+                    </div>
+                  )}
+                  <div className="admin-pre-reg-actions">
+                    {visitor.identificationDocument?.path && (
+                      <button type="button" onClick={() => openVisitorIdentification(visitor)} className="btn-view-document"><Eye size={16} />View ID</button>
+                    )}
+                    {visitor.reviewStatus === 'pending' && (
+                      <>
+                        <button type="button" onClick={() => reviewPreRegisteredVisitor(visitor, 'approved', false)} className="btn-approve"><CheckCircle size={16} />Approve</button>
+                        <button type="button" onClick={() => reviewPreRegisteredVisitor(visitor, 'approved', true)} className="btn-approve"><QrCode size={16} />Approve QR Entry</button>
+                        <button type="button" onClick={() => reviewPreRegisteredVisitor(visitor, 'rejected', false)} className="btn-reject"><XCircle size={16} />Reject</button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const wrapModule = (content) => (
     <div className="module-stage">
       <div className="module-stage__inner">{content}</div>
@@ -1458,6 +2136,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
       case 'residents':      return ResidentManagementContent();
       case 'vehicles':       return VehicleManagementContent();
       case 'visitors':       return VisitorLogsContent();
+      case 'pre-registered': return PreRegisteredVisitorsContent();
       case 'facilities':     return wrapModule(<AdminFacilityManagement token={token} showConfirm={showConfirm} />);
       case 'complaints':     return wrapModule(<AdminComplaintManagement token={token} />);
       case 'announcements':  return wrapModule(<AdminAnnouncementManagement token={token} showConfirm={showConfirm} />);
@@ -1465,6 +2144,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
       case 'cctv':           return wrapModule(<CCTVFeedsModule token={token} mode="admin" showAlert={showAlert} showConfirm={showConfirm} />);
       case 'billing':        return wrapModule(<AdminBillingManagement token={token} showConfirm={showConfirm} />);
       case 'bill_audit_logs': return wrapModule(<AdminBillsAuditLogs token={token} showConfirm={showConfirm} showAlert={showAlert} />);
+      case 'audit_logs':     return wrapModule(<AdminAuditLogs token={token} showAlert={showAlert} />);
       case 'documents':      return wrapModule(<AdminDocumentsManagement token={token} />);
       case 'analytics':      return wrapModule(<AIAnalyticsModule token={token} showAlert={showAlert} />);
       case 'ai_chatbot':     return wrapModule(<AdminAIChatbotModule token={token} showAlert={showAlert} />);
@@ -1529,6 +2209,13 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
             {renderContent()}
           </div>
         </div>
+        {viewingVisitorIdentification && (
+          <VisitorIdentificationModal
+            visitor={viewingVisitorIdentification}
+            token={token}
+            onClose={() => setViewingVisitorIdentification(null)}
+          />
+        )}
       </main>
     </div>
   );

@@ -1,12 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Calendar,
   CheckCircle2,
   Clock3,
   Landmark,
+  LayoutGrid,
   MapPin,
+  QrCode,
+  ScanLine,
   Search,
+  Table2,
   Users,
   XCircle
 } from 'lucide-react';
@@ -14,8 +18,18 @@ import { apiUrl, assetUrl } from '../../utils/api';
 import './GuardFacilityReservations.css';
 import PaginationControls from '../common/PaginationControls';
 import { buildPaginatedUrl, parsePaginatedResponse } from '../../utils/pagination';
+import {
+  extractFacilityGuestQrToken,
+  formatFacilityGuestQrAccessCode,
+  getFacilityGuestQrAccessCode,
+  getFacilityGuestQrMeta
+} from './facilityGuestQr';
 
 const formatDateTime = (value) => new Date(value).toLocaleString();
+const FACILITY_QR_CHECKPOINT_OPTIONS = [
+  { value: 'gate_entry', label: 'Gate Entrance' },
+  { value: 'gate_exit', label: 'Gate Exit' }
+];
 
 const GuardFacilityReservations = ({ token }) => {
   const [reservations, setReservations] = useState([]);
@@ -24,6 +38,13 @@ const GuardFacilityReservations = ({ token }) => {
   const [statusFilter, setStatusFilter] = useState('upcoming');
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(null);
+  const [viewMode, setViewMode] = useState('card');
+  const [qrCheckpoint, setQrCheckpoint] = useState('gate_entry');
+  const [qrTokenInput, setQrTokenInput] = useState('');
+  const [qrScannerActive, setQrScannerActive] = useState(false);
+  const qrVideoRef = useRef(null);
+  const qrStreamRef = useRef(null);
+  const qrScanIntervalRef = useRef(null);
 
   useEffect(() => {
     setPage(1);
@@ -56,6 +77,140 @@ const GuardFacilityReservations = ({ token }) => {
     setLoading(false);
   }, [page, searchQuery, statusFilter, token]);
 
+  const stopQrScanner = useCallback(() => {
+    if (qrScanIntervalRef.current) {
+      clearInterval(qrScanIntervalRef.current);
+      qrScanIntervalRef.current = null;
+    }
+
+    if (qrStreamRef.current) {
+      qrStreamRef.current.getTracks().forEach((track) => track.stop());
+      qrStreamRef.current = null;
+    }
+
+    setQrScannerActive(false);
+  }, []);
+
+  useEffect(() => stopQrScanner, [stopQrScanner]);
+
+  const submitQrScan = useCallback(async (rawValue) => {
+    const qrToken = extractFacilityGuestQrToken(rawValue);
+
+    if (!qrToken) {
+      window.alert('Please scan a valid facility guest QR pass or enter the guest code.');
+      return;
+    }
+
+    try {
+      const response = await fetch(apiUrl('/facilities/qr/scan'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ qrToken, checkpoint: qrCheckpoint })
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        window.alert(data.message || 'Failed to record the facility guest checkpoint.');
+        return;
+      }
+
+      window.alert(data.message || 'Facility guest checkpoint recorded.');
+      setQrTokenInput('');
+      stopQrScanner();
+      fetchReservations();
+    } catch (error) {
+      console.error('Error scanning facility guest QR:', error);
+      window.alert('Failed to record the facility guest checkpoint.');
+    }
+  }, [fetchReservations, qrCheckpoint, stopQrScanner, token]);
+
+  const startQrScanner = useCallback(async () => {
+    if (!('BarcodeDetector' in window)) {
+      window.alert('QR scanning is not supported by this browser. Use the guest code field instead.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' }
+      });
+      qrStreamRef.current = stream;
+      setQrScannerActive(true);
+
+      setTimeout(() => {
+        if (qrVideoRef.current) {
+          qrVideoRef.current.srcObject = stream;
+          qrVideoRef.current.play().catch(() => {});
+        }
+      }, 0);
+
+      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+      qrScanIntervalRef.current = setInterval(async () => {
+        const video = qrVideoRef.current;
+        if (!video || video.readyState < 2) return;
+
+        try {
+          const codes = await detector.detect(video);
+          const firstCode = codes[0]?.rawValue;
+          if (firstCode) {
+            await submitQrScan(firstCode);
+          }
+        } catch (error) {
+          console.error('Facility QR scan error:', error);
+        }
+      }, 900);
+    } catch (error) {
+      console.error('Error starting facility QR scanner:', error);
+      window.alert('Unable to open camera for facility QR scanning.');
+      stopQrScanner();
+    }
+  }, [stopQrScanner, submitQrScan]);
+
+  const loadGuestCodeIntoScanner = (reservation) => {
+    const accessCode = getFacilityGuestQrAccessCode(reservation);
+
+    if (!accessCode) {
+      window.alert('No facility guest code is available for this reservation yet.');
+      return;
+    }
+
+    setQrTokenInput(accessCode);
+    window.alert('Facility guest code loaded into the scanner field.');
+  };
+
+  const handleForgottenQrCheckpoint = async (reservation, checkpoint) => {
+    const checkpointLabel = checkpoint === 'gate_entry' ? 'Gate Entrance' : 'Gate Exit';
+    if (!window.confirm(`Bypass the forgotten ${checkpointLabel} scan for this reservation?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(apiUrl(`/facilities/${reservation._id}/qr/forgot`), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ checkpoint })
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        window.alert(data.message || `Failed to bypass ${checkpointLabel}.`);
+        return;
+      }
+
+      window.alert(data.message || `${checkpointLabel} bypassed successfully.`);
+      fetchReservations();
+    } catch (error) {
+      console.error('Error bypassing facility QR checkpoint:', error);
+      window.alert(`Failed to bypass ${checkpointLabel}.`);
+    }
+  };
+
   useEffect(() => {
     fetchReservations();
     const interval = setInterval(fetchReservations, 30000);
@@ -73,11 +228,16 @@ const GuardFacilityReservations = ({ token }) => {
     const guests = reservations
       .filter((reservation) => ['pending', 'approved'].includes(reservation.status))
       .reduce((total, reservation) => total + (Number(reservation.numberOfGuests) || 0), 0);
+    const guestsInside = reservations.reduce(
+      (total, reservation) => total + (Number(getFacilityGuestQrMeta(reservation).insideCount) || 0),
+      0
+    );
 
     return {
       approved,
       pending,
-      guests
+      guests,
+      guestsInside
     };
   }, [reservations]);
 
@@ -120,7 +280,41 @@ const GuardFacilityReservations = ({ token }) => {
             <strong>{summary.guests}</strong>
             <span>Expected Guests</span>
           </div>
+          <div>
+            <strong>{summary.guestsInside}</strong>
+            <span>Guests Inside</span>
+          </div>
         </div>
+      </div>
+
+      <div className="guard-facility-qr-panel">
+        <div className="guard-facility-qr-head">
+          <div>
+            <h3><QrCode size={18} /> Facility Guest QR Scanner</h3>
+            <p>Select a gate checkpoint, then scan the reservation QR or enter the guest code manually when camera access is unavailable.</p>
+          </div>
+          <select value={qrCheckpoint} onChange={(event) => setQrCheckpoint(event.target.value)} className="form-input">
+            {FACILITY_QR_CHECKPOINT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="guard-facility-qr-controls">
+          <button type="button" className="guard-facility-qr-btn primary" onClick={qrScannerActive ? stopQrScanner : startQrScanner}>
+            <ScanLine size={16} />{qrScannerActive ? 'Stop Scanner' : 'Scan QR'}
+          </button>
+          <input
+            type="text"
+            value={qrTokenInput}
+            onChange={(event) => setQrTokenInput(event.target.value)}
+            placeholder="Facility guest code or QR token"
+            className="form-input"
+          />
+          <button type="button" className="guard-facility-qr-btn" onClick={() => submitQrScan(qrTokenInput)}>
+            <CheckCircle2 size={16} />Record
+          </button>
+        </div>
+        {qrScannerActive && <video ref={qrVideoRef} className="guard-facility-qr-video" muted playsInline />}
       </div>
 
       <div className="guard-facility-toolbar">
@@ -151,6 +345,16 @@ const GuardFacilityReservations = ({ token }) => {
             </button>
           ))}
         </div>
+        <div className="module-view-toggle">
+          <button type="button" className={`module-view-toggle__btn ${viewMode === 'card' ? 'active' : ''}`} onClick={() => setViewMode('card')}>
+            <LayoutGrid size={16} />
+            <span>Cards</span>
+          </button>
+          <button type="button" className={`module-view-toggle__btn ${viewMode === 'table' ? 'active' : ''}`} onClick={() => setViewMode('table')}>
+            <Table2 size={16} />
+            <span>Table</span>
+          </button>
+        </div>
       </div>
 
       {loading && reservations.length === 0 ? (
@@ -164,11 +368,97 @@ const GuardFacilityReservations = ({ token }) => {
           <h3>No Reservations to Show</h3>
           <p>{searchQuery ? 'Try another keyword.' : 'There are no facility reservations matching this view yet.'}</p>
         </div>
+      ) : viewMode === 'table' ? (
+        <div className="module-table-card">
+          <div className="module-table-wrap">
+            <table className="module-table">
+              <thead>
+                <tr>
+                  <th>Facility</th>
+                  <th>Resident Host</th>
+                  <th>Schedule</th>
+                  <th>Guests / Duration</th>
+                  <th>Status</th>
+                  <th>Guest Gate QR</th>
+                  <th>Purpose</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleReservations.map((reservation) => {
+                  const status = getStatusMeta(reservation.status);
+                  const guestQr = getFacilityGuestQrMeta(reservation);
+                  return (
+                    <tr key={reservation._id}>
+                      <td>
+                        <span className="module-table__primary">{reservation.facility?.name || reservation.facilityName}</span>
+                        <span className="module-table__secondary">{reservation.eventType}</span>
+                      </td>
+                      <td>
+                        <span className="module-table__primary">{reservation.residentName}</span>
+                        <span className="module-table__secondary">{reservation.residentAddress}</span>
+                      </td>
+                      <td>
+                        <span className="module-table__primary">{formatDateTime(reservation.dateReserved)}</span>
+                        <span className="module-table__secondary">{reservation.approvedAt ? `Approved on ${new Date(reservation.approvedAt).toLocaleDateString()}` : 'Awaiting approval'}</span>
+                      </td>
+                      <td>
+                        <span className="module-table__primary">{reservation.numberOfGuests || 0} guest(s)</span>
+                        <span className="module-table__secondary">{reservation.durationHours} hour{reservation.durationHours > 1 ? 's' : ''}</span>
+                      </td>
+                      <td>
+                        <span className={`module-table__pill ${reservation.status === 'approved' ? 'success' : reservation.status === 'rejected' || reservation.status === 'expired' ? 'danger' : 'pending'}`}>
+                          {status.label}
+                        </span>
+                      </td>
+                      <td>
+                        {guestQr.enabled ? (
+                          <div className="module-table__progress">
+                            <span>Entry: {guestQr.entry.used}/{guestQr.entry.total}</span>
+                            <span>Exit: {guestQr.exit.used}/{guestQr.exit.total}</span>
+                            <span>Inside: {guestQr.insideCount}</span>
+                            {getFacilityGuestQrAccessCode(reservation) && (
+                              <span className="module-table__code">{formatFacilityGuestQrAccessCode(getFacilityGuestQrAccessCode(reservation))}</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="module-table__empty">No guest gate pass</span>
+                        )}
+                      </td>
+                      <td>
+                        <span className="module-table__notes">{reservation.purpose}</span>
+                      </td>
+                      <td>
+                        <div className="module-table__actions">
+                          {guestQr.enabled && (
+                            <>
+                              <button type="button" className="module-table__action-btn info" onClick={() => loadGuestCodeIntoScanner(reservation)}>
+                                <QrCode size={14} /> Use Code
+                              </button>
+                              <button type="button" className="module-table__action-btn secondary" onClick={() => handleForgottenQrCheckpoint(reservation, 'gate_entry')}>
+                                Forgot Entrance
+                              </button>
+                              <button type="button" className="module-table__action-btn secondary" onClick={() => handleForgottenQrCheckpoint(reservation, 'gate_exit')}>
+                                Forgot Exit
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : (
         <div className="guard-facility-grid">
           {visibleReservations.map((reservation) => {
             const status = getStatusMeta(reservation.status);
             const StatusIcon = status.icon;
+            const guestQr = getFacilityGuestQrMeta(reservation);
+            const guestCode = getFacilityGuestQrAccessCode(reservation);
 
             return (
               <article key={reservation._id} className="guard-facility-card">
@@ -233,6 +523,30 @@ const GuardFacilityReservations = ({ token }) => {
                     <strong>Purpose / Event Notes</strong>
                     <p>{reservation.purpose}</p>
                   </div>
+
+                  {guestQr.enabled && (
+                    <div className="guard-facility-guest-qr-card">
+                      <div className="guard-facility-guest-qr-head">
+                        <div>
+                          <strong>Guest Gate Pass</strong>
+                          <p>Entry {guestQr.entry.used}/{guestQr.entry.total} | Exit {guestQr.exit.used}/{guestQr.exit.total} | Inside {guestQr.insideCount}</p>
+                        </div>
+                        <button type="button" className="guard-facility-inline-btn" onClick={() => loadGuestCodeIntoScanner(reservation)}>
+                          <QrCode size={15} /> Use Code
+                        </button>
+                      </div>
+                      {guestCode && (
+                        <div className="guard-facility-guest-code">
+                          <span>Guest Code</span>
+                          <strong>{formatFacilityGuestQrAccessCode(guestCode)}</strong>
+                        </div>
+                      )}
+                      <div className="guard-facility-forgot-actions">
+                        <button type="button" onClick={() => handleForgottenQrCheckpoint(reservation, 'gate_entry')}>Forgot Entrance Scan</button>
+                        <button type="button" onClick={() => handleForgottenQrCheckpoint(reservation, 'gate_exit')}>Forgot Exit Scan</button>
+                      </div>
+                    </div>
+                  )}
 
                   {reservation.status === 'approved' && reservation.approvedAt && (
                     <div className="guard-facility-approved">

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiUrl } from '../../utils/api';
-import { AlertCircle, Download, Eye, FileText, Pencil, Upload, XCircle } from 'lucide-react';
+import { AlertCircle, Download, Eye, FileText, LayoutGrid, Pencil, Table2, Upload, XCircle } from 'lucide-react';
 import PaginationControls from '../common/PaginationControls';
 import { buildPaginatedUrl, parsePaginatedResponse } from '../../utils/pagination';
 import {
@@ -36,6 +36,7 @@ const ResidentDocumentsManagement = ({ token, showAlert }) => {
   const [previewError, setPreviewError] = useState('');
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(null);
+  const [viewMode, setViewMode] = useState('card');
 
   const fetchTemplates = useCallback(async () => {
     try {
@@ -346,9 +347,21 @@ const ResidentDocumentsManagement = ({ token, showAlert }) => {
       </div>
 
       <section className="resident-doc-card">
-        <div className="resident-doc-card-head">
-          <h3>Submission Status Tracker</h3>
-          <p>Monitor your uploaded forms and admin remarks here.</p>
+        <div className="resident-doc-card-head module-view-bar">
+          <div>
+            <h3>Submission Status Tracker</h3>
+            <p>Monitor your uploaded forms and admin remarks here.</p>
+          </div>
+          <div className="module-view-toggle">
+            <button type="button" className={`module-view-toggle__btn ${viewMode === 'card' ? 'active' : ''}`} onClick={() => setViewMode('card')}>
+              <LayoutGrid size={16} />
+              <span>Cards</span>
+            </button>
+            <button type="button" className={`module-view-toggle__btn ${viewMode === 'table' ? 'active' : ''}`} onClick={() => setViewMode('table')}>
+              <Table2 size={16} />
+              <span>Table</span>
+            </button>
+          </div>
         </div>
 
         {submissions.length === 0 ? (
@@ -356,6 +369,63 @@ const ResidentDocumentsManagement = ({ token, showAlert }) => {
             <FileText size={40} style={{ color: '#9ca3af' }} />
             <h3>No Forms Submitted Yet</h3>
             <p>Your uploaded resident document forms will appear here once submitted.</p>
+          </div>
+        ) : viewMode === 'table' ? (
+          <div className="module-table-card">
+            <div className="module-table-wrap">
+              <table className="module-table">
+                <thead>
+                  <tr>
+                    <th>Document Type</th>
+                    <th>Subject / Details</th>
+                    <th>Submitted</th>
+                    <th>Status</th>
+                    <th>Admin Remarks</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {submissions.map((submission) => (
+                    <tr key={submission._id}>
+                      <td>
+                        <span className="module-table__primary">{submission.documentType}</span>
+                      </td>
+                      <td>
+                        <span className="module-table__primary">{submission.subject}</span>
+                        <span className="module-table__notes">{submission.details}</span>
+                      </td>
+                      <td>
+                        <span className="module-table__primary">{new Date(submission.createdAt).toLocaleString()}</span>
+                      </td>
+                      <td>
+                        <span className={`module-table__pill ${submission.status === 'approved' ? 'success' : submission.status === 'rejected' ? 'danger' : submission.status === 'in_review' ? 'info' : 'pending'}`}>
+                          {statusMap[submission.status]?.label || 'Pending'}
+                        </span>
+                      </td>
+                      <td>
+                        {submission.adminRemarks ? (
+                          <span className="module-table__notes">{submission.adminRemarks}</span>
+                        ) : (
+                          <span className="module-table__empty">No remarks yet</span>
+                        )}
+                      </td>
+                      <td>
+                        <div className="module-table__actions">
+                          <button type="button" className="module-table__action-btn secondary" onClick={() => openPreview(submission)}>
+                            <Eye size={14} /> View File
+                          </button>
+                          {submission.status !== 'approved' && (
+                            <button type="button" className="module-table__action-btn info" onClick={() => beginEdit(submission)}>
+                              <Pencil size={14} /> Update
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : (
           <div className="resident-doc-submission-list">

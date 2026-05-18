@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiUrl, assetUrl } from '../../utils/api';
-import { Download, Eye, FileText, Search, XCircle } from 'lucide-react';
+import { Download, Eye, FileText, LayoutGrid, Search, Table2, XCircle } from 'lucide-react';
 import PaginationControls from '../common/PaginationControls';
 import { buildPaginatedUrl, parsePaginatedResponse } from '../../utils/pagination';
 import './AdminDocumentsManagement.css';
@@ -25,6 +25,7 @@ const AdminDocumentsManagement = ({ token }) => {
   const [saving, setSaving] = useState(false);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(null);
+  const [viewMode, setViewMode] = useState('card');
 
   const fetchResidents = useCallback(async () => {
     try {
@@ -159,6 +160,16 @@ const AdminDocumentsManagement = ({ token }) => {
             <option key={resident._id} value={resident._id}>{resident.familyName}</option>
           ))}
         </select>
+        <div className="module-view-toggle">
+          <button type="button" className={`module-view-toggle__btn ${viewMode === 'card' ? 'active' : ''}`} onClick={() => setViewMode('card')}>
+            <LayoutGrid size={16} />
+            <span>Cards</span>
+          </button>
+          <button type="button" className={`module-view-toggle__btn ${viewMode === 'table' ? 'active' : ''}`} onClick={() => setViewMode('table')}>
+            <Table2 size={16} />
+            <span>Table</span>
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -171,6 +182,78 @@ const AdminDocumentsManagement = ({ token }) => {
           <FileText size={40} style={{ color: '#9ca3af' }} />
           <h3>No Resident Document Forms Found</h3>
           <p>Submitted forms will appear here once residents upload them.</p>
+        </div>
+      ) : viewMode === 'table' ? (
+        <div className="module-table-card">
+          <div className="module-table-wrap">
+            <table className="module-table">
+              <thead>
+                <tr>
+                  <th>Resident</th>
+                  <th>Document</th>
+                  <th>Details</th>
+                  <th>Timeline</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredSubmissions.map((submission) => (
+                  <tr key={submission._id}>
+                    <td>
+                      <span className="module-table__primary">{submission.residentName}</span>
+                      <span className="module-table__secondary">{submission.residentAddress}</span>
+                    </td>
+                    <td>
+                      <span className="module-table__primary">{submission.documentType}</span>
+                      <span className="module-table__secondary">{submission.subject}</span>
+                    </td>
+                    <td>
+                      <span className="module-table__notes">{submission.details}</span>
+                    </td>
+                    <td>
+                      <span className="module-table__primary">Submitted {new Date(submission.createdAt).toLocaleString()}</span>
+                      <span className="module-table__secondary">
+                        {submission.reviewedAt ? `Reviewed ${new Date(submission.reviewedAt).toLocaleString()}` : 'Not reviewed yet'}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`module-table__pill ${submission.status === 'approved' ? 'success' : submission.status === 'rejected' ? 'danger' : submission.status === 'in_review' ? 'info' : 'pending'}`}>
+                        {statusMap[submission.status]?.label || 'Pending'}
+                      </span>
+                      {submission.adminRemarks && <span className="module-table__secondary">{submission.adminRemarks}</span>}
+                    </td>
+                    <td>
+                      <div className="module-table__actions">
+                        <button type="button" className="module-table__action-btn secondary" onClick={() => setPreviewFile(submission.submissionFile)}>
+                          <Eye size={14} /> View
+                        </button>
+                        <a
+                          className="module-table__action-btn info"
+                          href={assetUrl(submission.submissionFile.path)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          download={submission.submissionFile.originalName}
+                        >
+                          <Download size={14} /> Download
+                        </a>
+                        <button
+                          type="button"
+                          className="module-table__action-btn primary"
+                          onClick={() => {
+                            setViewMode('card');
+                            startReview(submission);
+                          }}
+                        >
+                          Review
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : (
         <div className="admin-doc-list">

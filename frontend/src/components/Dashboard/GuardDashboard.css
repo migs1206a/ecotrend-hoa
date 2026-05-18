@@ -1368,6 +1368,198 @@ body {
   transform: translateY(-4px);
 }
 
+.guard-qr-panel {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  padding: 1rem;
+  margin-bottom: 1.25rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.08);
+}
+
+.guard-qr-panel-head,
+.guard-qr-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 260px);
+  gap: 1rem;
+  align-items: center;
+}
+
+.guard-qr-panel-head h3 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #1f2937;
+  font-size: 1rem;
+}
+
+.guard-qr-panel-head p {
+  margin: 0.25rem 0 0;
+  color: #6b7280;
+  font-size: 0.85rem;
+}
+
+.guard-qr-controls {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  margin-top: 1rem;
+}
+
+.guard-qr-video {
+  width: 100%;
+  max-height: 280px;
+  object-fit: cover;
+  border-radius: 0.75rem;
+  margin-top: 1rem;
+  background: #111827;
+}
+
+.guard-forgot-qr-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.guard-forgot-qr-actions button {
+  border: none;
+  border-radius: 0.6rem;
+  background: #f3f4f6;
+  color: #374151;
+  font-family: inherit;
+  font-weight: 800;
+  padding: 0.7rem;
+  cursor: pointer;
+}
+
+.guard-forgot-qr-actions button:hover {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.guard-visitor-code-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding: 1rem 1.1rem;
+  border-radius: 1rem;
+  border: 1px solid #d1fae5;
+  background: linear-gradient(135deg, #f0fdf4 0%, #ecfeff 100%);
+}
+
+.guard-visitor-code-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #065f46;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.guard-visitor-code-card strong {
+  display: block;
+  color: #111827;
+  font-size: 0.98rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  white-space: pre-line;
+  line-height: 1.55;
+}
+
+.guard-visitor-code-card p {
+  margin: 0.45rem 0 0;
+  color: #4b5563;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  max-width: 30rem;
+}
+
+.guard-pre-reg-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.guard-inline-note {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border-radius: 0.9rem;
+  background: #f3f4f6;
+  color: #4b5563;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.guard-secondary-btn,
+.guard-success-btn,
+.guard-danger-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.85rem 1rem;
+  border: none;
+  border-radius: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.guard-secondary-btn {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.guard-secondary-btn:hover {
+  background: #0284c7;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.guard-success-btn {
+  background: linear-gradient(135deg, #16a34a 0%, #0f766e 100%);
+  color: #ffffff;
+  box-shadow: 0 10px 22px rgba(5, 150, 105, 0.18);
+}
+
+.guard-success-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 26px rgba(5, 150, 105, 0.24);
+}
+
+.guard-danger-btn {
+  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+  color: #b91c1c;
+}
+
+.guard-danger-btn:hover {
+  background: #ef4444;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.guard-secondary-btn:disabled,
+.guard-success-btn:disabled,
+.guard-danger-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
 .visitor-log-header {
   display: flex;
   align-items: flex-start;
@@ -2042,6 +2234,21 @@ body {
   .visitor-cards-grid {
     grid-template-columns: 1fr;
     gap: 1.5rem;
+  }
+
+  .guard-qr-panel-head,
+  .guard-qr-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .guard-visitor-code-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .guard-pre-reg-actions,
+  .guard-forgot-qr-actions {
+    grid-template-columns: 1fr;
   }
 
   /* Quick actions */

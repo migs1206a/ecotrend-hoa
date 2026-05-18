@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import QRCode from 'qrcode';
 import ecohoa from '../../assets/ecohoa.png';
 import { apiUrl, assetUrl } from '../../utils/api';
 import { 
   Home, LogOut, User, Car, UserCheck, Calendar, 
   DollarSign, Bell, FileText, MessageSquare, Menu, X, 
   ChevronRight, AlertCircle, CheckCircle, Phone, MapPin,
-  Mail, Users, Edit, Save, XCircle, Plus, Trash2, Upload, Package,
-  Map as MapIcon
+  Mail, Users, Edit, Save, XCircle, Plus, Trash2, Upload, Package, Eye, Copy,
+  Map as MapIcon, QrCode, Search, LayoutGrid, Table2
 } from 'lucide-react';
 import './ResidentDashboard.css';
 import ResidentAnnouncements from '../AnnouncementManagement/ResidentAnnouncements';
@@ -24,10 +25,7 @@ import {
   validateNameValue,
   validatePhoneNumberValue
 } from '../../utils/formSecurity';
-import {
-  IMAGE_UPLOAD_MAX_BYTES,
-  validateImageFile
-} from '../../utils/uploadValidation';
+import { IMAGE_UPLOAD_MAX_BYTES, formatFileSize, validateImageFile } from '../../utils/uploadValidation';
 import {
   formatResidentAddress,
   formatResidentExpiry,
@@ -35,6 +33,219 @@ import {
   getResidentOccupancyLabel,
   isResidentAccessRestricted
 } from '../../utils/residentAccounts';
+import { SUBDIVISION_MAP_MODULE } from '../../utils/adminPermissions';
+
+const QR_PAYLOAD_PREFIX = 'ECOTREND_VISITOR_QR:';
+const VISITOR_ID_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png'];
+
+const getVisitorDateLabel = (visitor) => {
+  const value = visitor.entryTime || visitor.expectedDate || visitor.createdAt;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'No date yet' : date.toLocaleDateString();
+};
+
+const getVisitorStatusLabel = (visitor) => {
+  if (visitor.status === 'rejected' || visitor.reviewStatus === 'rejected') return 'Rejected';
+  if (visitor.reviewStatus === 'pending') return 'Pending Review';
+  if (visitor.status === 'inside') return 'Inside';
+  if (visitor.status === 'exited') return 'Exited';
+  return 'Approved';
+};
+
+const getVisitorStatusTone = (visitor) => {
+  if (visitor.status === 'rejected' || visitor.reviewStatus === 'rejected') return 'rejected';
+  if (visitor.reviewStatus === 'pending') return 'pending';
+  if (visitor.status === 'inside') return 'inside';
+  if (visitor.status === 'exited') return 'exited';
+  return 'approved';
+};
+
+const getVisitorPartySize = (visitor) => 1 + (Array.isArray(visitor?.accompanyingVisitors) ? visitor.accompanyingVisitors.length : 0);
+const getVisitorAccessCode = (visitor) => String(visitor?.qrManualCode || visitor?.qrToken || '').trim();
+const formatVisitorAccessCode = (value) => String(value || '').trim().match(/.{1,4}/g)?.join('\n') || '';
+const getCheckpointProgress = (visitor, checkpoint) => {
+  const checkpoints = Array.isArray(visitor?.qrCheckpoints) ? visitor.qrCheckpoints : [];
+  const matching = checkpoints.filter((item) => item.checkpoint === checkpoint);
+  return {
+    total: matching.length,
+    used: matching.filter((item) => item.usedAt).length
+  };
+};
+
+const VisitorQrModal = ({ visitor, onClose, onForgottenScan, onCopyCode, onRecordHomeCheckpoint, checkpointLoading }) => {
+  const [qrDataUrl, setQrDataUrl] = useState('');
+  const [residentScanInput, setResidentScanInput] = useState('');
+  const accessCode = getVisitorAccessCode(visitor);
+  const checkpoints = Array.isArray(visitor?.qrCheckpoints) ? visitor.qrCheckpoints : [];
+  const partySize = getVisitorPartySize(visitor);
+  const homeEntryProgress = getCheckpointProgress(visitor, 'home_arrival');
+  const homeExitProgress = getCheckpointProgress(visitor, 'home_exit');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const buildQr = async () => {
+      if (!visitor?.qrEntryEnabled || !visitor?.qrToken) {
+        setQrDataUrl('');
+        return;
+      }
+
+      const dataUrl = await QRCode.toDataURL(`${QR_PAYLOAD_PREFIX}${visitor.qrToken}`, {
+        width: 220,
+        margin: 1,
+        errorCorrectionLevel: 'M'
+      });
+
+      if (!cancelled) {
+        setQrDataUrl(dataUrl);
+      }
+    };
+
+    buildQr().catch(() => setQrDataUrl(''));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [visitor?.qrEntryEnabled, visitor?.qrToken]);
+
+  useEffect(() => {
+    setResidentScanInput(accessCode);
+  }, [accessCode, visitor?._id]);
+
+  if (!visitor?.qrEntryEnabled || !visitor?.qrToken) {
+    return null;
+  }
+
+  return (
+    <div className="resident-qr-modal-overlay" onClick={onClose}>
+      <div className="resident-qr-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="resident-qr-modal-header">
+          <div>
+            <div className="resident-qr-modal-kicker">Pre-Registered Visitor Pass</div>
+            <h3>{visitor.name}</h3>
+            <p>Share this QR with the visitor, or use the visitor code when camera access is unavailable.</p>
+          </div>
+          <button type="button" onClick={onClose} className="resident-qr-modal-close">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="resident-qr-modal-body">
+          <div className="resident-qr-preview-card">
+            <div className="resident-qr-preview-head">
+              <span className={`vr-status ${getVisitorStatusTone(visitor)}`}>
+                {getVisitorStatusLabel(visitor)}
+              </span>
+              <span className="resident-qr-preview-type">
+                <QrCode size={14} /> QR Entry Ready
+              </span>
+            </div>
+            {qrDataUrl && <img src={qrDataUrl} alt={`QR entry pass for ${visitor.name}`} />}
+            <p>Valid for gate entry, home arrival, home exit, and gate exit.</p>
+          </div>
+          <div className="resident-qr-details-panel">
+            <div className="resident-qr-detail-grid">
+              <div className="resident-qr-detail-card">
+                <span>Purpose</span>
+                <strong>{visitor.purpose || 'Not set'}</strong>
+              </div>
+              <div className="resident-qr-detail-card">
+                <span>Expected</span>
+                <strong>{visitor.expectedDate ? new Date(visitor.expectedDate).toLocaleString() : 'Any time'}</strong>
+              </div>
+              <div className="resident-qr-detail-card">
+                <span>Vehicle</span>
+                <strong>{visitor.vehiclePlateNumber ? `${visitor.vehiclePlateNumber}${visitor.vehicleType ? ` (${visitor.vehicleType})` : ''}` : 'No vehicle listed'}</strong>
+              </div>
+              <div className="resident-qr-detail-card">
+                <span>Companions</span>
+                <strong>{Array.isArray(visitor.accompanyingVisitors) ? visitor.accompanyingVisitors.length : 0}</strong>
+              </div>
+              <div className="resident-qr-detail-card">
+                <span>Required Scans</span>
+                <strong>{partySize * 4} total</strong>
+              </div>
+            </div>
+            <div className="resident-qr-code-card">
+              <div className="resident-qr-code-header">
+                <div>
+                  <span className="resident-qr-code-label">Visitor Code</span>
+                  <p>Use this short code when camera-based QR scanning is unavailable. Guards use it for gate scans, and residents use it for home scans.</p>
+                </div>
+                {accessCode && (
+                  <button type="button" onClick={() => onCopyCode(accessCode)} className="resident-qr-copy-btn">
+                    <Copy size={15} /> Copy Code
+                  </button>
+                )}
+              </div>
+              <div className="resident-qr-code-value">{formatVisitorAccessCode(accessCode) || 'No visitor code available yet'}</div>
+            </div>
+            <div className="resident-qr-home-panel">
+              <div className="resident-qr-home-panel-head">
+                <div>
+                  <h4>Resident Home Scanner Fallback</h4>
+                  <p>No resident camera scanner is installed here. Enter the visitor code or a pasted QR token below to record Home Entry and Home Exit.</p>
+                </div>
+                <span className="resident-qr-home-badge">QR Approved</span>
+              </div>
+              <input
+                type="text"
+                value={residentScanInput}
+                onChange={(event) => setResidentScanInput(event.target.value)}
+                placeholder="Short visitor code or pasted QR token"
+                className="resident-qr-home-input"
+              />
+              <div className="resident-qr-home-actions">
+                <button
+                  type="button"
+                  onClick={() => onRecordHomeCheckpoint(visitor, residentScanInput || accessCode, 'home_arrival')}
+                  disabled={checkpointLoading}
+                >
+                  <QrCode size={16} />
+                  Record Home Entry {homeEntryProgress.total ? `(${homeEntryProgress.used}/${homeEntryProgress.total})` : ''}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRecordHomeCheckpoint(visitor, residentScanInput || accessCode, 'home_exit')}
+                  disabled={checkpointLoading}
+                >
+                  <QrCode size={16} />
+                  Record Home Exit {homeExitProgress.total ? `(${homeExitProgress.used}/${homeExitProgress.total})` : ''}
+                </button>
+              </div>
+            </div>
+            {checkpoints.length > 0 && (
+              <div className="resident-qr-checkpoints">
+                <h4>Checkpoint Status</h4>
+                <div className="resident-qr-checkpoint-list">
+                  {checkpoints.map((checkpoint, index) => (
+                    <div key={`${checkpoint.checkpoint}-${checkpoint.memberIndex ?? 0}-${index}`} className="resident-qr-checkpoint-item">
+                      <div>
+                        <strong>{checkpoint.label}</strong>
+                        <span>{checkpoint.memberLabel || `Visitor ${Number(checkpoint.memberIndex || 0) + 1}`}</span>
+                        <span>{checkpoint.usedAt ? new Date(checkpoint.usedAt).toLocaleString() : 'Waiting for scan'}</span>
+                      </div>
+                      <span className={`resident-qr-checkpoint-badge ${checkpoint.usedAt ? 'used' : 'pending'}`}>
+                        {checkpoint.usedAt ? 'Recorded' : 'Pending'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="resident-qr-modal-actions">
+              <button type="button" onClick={() => onForgottenScan(visitor, 'home_arrival')}>
+                Forgot Home Entry Scan
+              </button>
+              <button type="button" onClick={() => onForgottenScan(visitor, 'home_exit')}>
+                Forgot Home Exit Scan
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const ResidentDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -56,15 +267,19 @@ const ResidentDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const [vehiclesPagination, setVehiclesPagination] = useState(null);
   const [showDeletedModal, setShowDeletedModal] = useState(false);
   const [recentVisitors, setRecentVisitors] = useState([]);
+  const [viewingVisitorQr, setViewingVisitorQr] = useState(null);
+  const [visitorHistoryQuery, setVisitorHistoryQuery] = useState('');
+  const [visitorHistoryViewMode, setVisitorHistoryViewMode] = useState('card');
 
   const [visitorForm, setVisitorForm] = useState({
   entryType: 'visitor',
   visitorLastName: '', visitorFirstName: '', visitorMiddleName: '',
-  visitorContact: '+63', purposeOfVisit: '',
+  visitorContact: '+63', visitorRelationshipToResident: '', visitorIdentification: '', purposeOfVisit: '',
   deliveryDriverName: '', deliveryContact: '+63',
   expectedDate: '', vehiclePlateNumber: '', vehicleType: '', vehicleColor: '',
   accompanyingVisitors: []
 });
+  const [visitorIdentificationFile, setVisitorIdentificationFile] = useState(null);
 
   const [stats, setStats] = useState({ registeredVehicles: 0, recentVisitors: 0, familyMembers: 0, accountStatus: 'Active' });
   const [recentAnnouncements, setRecentAnnouncements] = useState([]);
@@ -75,6 +290,11 @@ const ResidentDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const token = localStorage.getItem('token');
   const sanitizePlateNumberInput = (value, maxLength = 10) =>
     String(value || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, maxLength);
+  const sanitizeIdInput = (value, maxLength = 16) =>
+    String(value || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, maxLength);
+  const textOnlyPattern = /^[A-Za-z\s.'-]+$/;
+  const purposePattern = /^[A-Za-z\s.,'-]+$/;
+  const idPattern = /^[A-Z0-9]{1,16}$/;
 
   const addAccompanyingVisitor = () => {
     setVisitorForm((current) => ({
@@ -93,7 +313,9 @@ const ResidentDashboard = ({ onLogout, showConfirm, showAlert }) => {
         if (companionIndex !== index) return companion;
         const sanitizedValue = ['lastName', 'firstName'].includes(field)
           ? sanitizeNameInput(value, 30)
-          : String(value || '').replace(/[^\w\s#.-]/g, '').slice(0, field === 'identification' ? 80 : 50);
+          : field === 'identification'
+            ? sanitizeIdInput(value, 16)
+            : String(value || '').replace(/[^a-zA-Z\s.'-]/g, '').slice(0, 40);
         return { ...companion, [field]: sanitizedValue };
       })
     }));
@@ -104,6 +326,116 @@ const ResidentDashboard = ({ onLogout, showConfirm, showAlert }) => {
       ...current,
       accompanyingVisitors: (current.accompanyingVisitors || []).filter((_, companionIndex) => companionIndex !== index)
     }));
+  };
+
+  const handleVisitorIdentificationFile = (file) => {
+    if (!file) {
+      setVisitorIdentificationFile(null);
+      return;
+    }
+
+    if (!VISITOR_ID_MIME_TYPES.includes(String(file.type || '').toLowerCase())) {
+      showAlert('Visitor identification must be a JPG or PNG image.', 'error');
+      setVisitorIdentificationFile(null);
+      return;
+    }
+
+    if (file.size > IMAGE_UPLOAD_MAX_BYTES) {
+      showAlert(`Visitor identification is too large. Maximum size is ${formatFileSize(IMAGE_UPLOAD_MAX_BYTES)}.`, 'error');
+      setVisitorIdentificationFile(null);
+      return;
+    }
+
+    setVisitorIdentificationFile(file);
+  };
+
+  const handleForgottenVisitorScan = async (visitor, checkpoint) => {
+    if (!['home_arrival', 'home_exit'].includes(checkpoint)) {
+      showAlert('Residents can only mark forgotten Home Entry or Home Exit scans.', 'error');
+      return;
+    }
+
+    const checkpointLabel = checkpoint === 'home_arrival' ? 'Home Entry' : 'Home Exit';
+
+    showConfirm(
+      `Mark ${checkpointLabel} as forgotten for ${visitor?.name || 'this visitor'}? This is only for resident-side home scanning, not gate scanning.`,
+      async () => {
+        try {
+          setLoading(true);
+          const response = await fetch(apiUrl(`/visitors/${visitor._id}/qr/forgot`), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({ checkpoint })
+          });
+          const data = await response.json();
+
+          if (!response.ok) {
+            showAlert(data.message || `Failed to record forgotten ${checkpointLabel.toLowerCase()}.`, 'error');
+            return;
+          }
+
+          showAlert(data.message || `${checkpointLabel} was recorded successfully.`, 'success');
+          setViewingVisitorQr(data.visitor || visitor);
+          fetchRecentVisitors();
+        } catch (error) {
+          showAlert(`Failed to record forgotten ${checkpointLabel.toLowerCase()}.`, 'error');
+        } finally {
+          setLoading(false);
+        }
+      }
+    );
+  };
+
+  const handleCopyVisitorCode = async (code) => {
+    if (!code) {
+      showAlert('No visitor code is available for this QR pass yet.', 'error');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(code);
+      showAlert('Visitor code copied to clipboard.', 'success');
+    } catch (error) {
+      showAlert('Unable to copy the visitor code right now.', 'error');
+    }
+  };
+
+  const handleResidentQrCheckpoint = async (visitor, rawCredential, checkpoint) => {
+    const credential = String(rawCredential || '').trim();
+
+    if (!credential) {
+      showAlert('Enter the visitor code or paste the QR token before recording this home checkpoint.', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await fetch(apiUrl('/visitors/qr/scan'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ qrToken: credential, checkpoint })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        showAlert(data.message || 'Failed to record the home QR checkpoint.', 'error');
+        return;
+      }
+
+      showAlert(data.message || 'Home QR checkpoint recorded.', 'success');
+      setViewingVisitorQr(data.visitor || visitor);
+      fetchRecentVisitors();
+    } catch (error) {
+      showAlert('Failed to record the home QR checkpoint.', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const normalizeResidentFamilyMembers = (members = []) => {
@@ -176,13 +508,13 @@ const ResidentDashboard = ({ onLogout, showConfirm, showAlert }) => {
     { id: 'overview',       icon: Home,         label: 'Overview' },
     { id: 'profile',        icon: User,         label: 'My Profile' },
     { id: 'vehicles',       icon: Car,          label: 'My Vehicles' },
-    { id: 'visitors',       icon: UserCheck,    label: 'Pre-register Visitor' },
+    { id: 'visitors',       icon: UserCheck,    label: 'Pre-Registered Visitors' },
     { id: 'facilities',     icon: Calendar,     label: 'Facility Reservation' },
     { id: 'complaints',     icon: AlertCircle,  label: 'Complaints' },
     { id: 'announcements',  icon: Bell,         label: 'Announcements' },
     { id: 'billing',        icon: PesoIcon,     label: 'Billing & Payments' },
     { id: 'documents',      icon: FileText,     label: 'Documents & Forms' },
-    { id: 'subdivision_map', icon: MapIcon,     label: '3D Mapped Subdivision' },
+    { id: 'subdivision_map', icon: MapIcon,     label: SUBDIVISION_MAP_MODULE.label },
     { id: 'contact',        icon: MessageSquare,label: 'Contact HOA' }
   ];
 
@@ -247,20 +579,12 @@ const ResidentDashboard = ({ onLogout, showConfirm, showAlert }) => {
     });
     if (response.ok) {
       const data = await response.json();
-      const familyName = profile?.familyName?.toLowerCase() || '';
-      const myVisitors = data.filter(v => {
-        if (!familyName) return false;
-        const byName     = typeof v.hostResidentName === 'string' &&
-                           v.hostResidentName.toLowerCase().includes(familyName);
-        const byResident = typeof v.hostResident === 'string' &&
-                           v.hostResident.toLowerCase().includes(familyName);
-        return byName || byResident;
-      });
-      setRecentVisitors(myVisitors.slice(0, 5));
+      const myVisitors = Array.isArray(data) ? data : [];
+      setRecentVisitors(myVisitors);
       setStats(prev => ({ ...prev, recentVisitors: myVisitors.length }));
     }
   } catch (error) { console.error('Error fetching visitors:', error); }
-}, [token, profile, user.id]);
+}, [token, user.id]);
 
   const fetchAnnouncements = useCallback(async () => {
     try {
@@ -293,7 +617,7 @@ const ResidentDashboard = ({ onLogout, showConfirm, showAlert }) => {
   }, [activeModule, menuItems]);
 
   useEffect(() => {
-  if (activeModule === 'vehicles') {
+    if (activeModule === 'vehicles') {
     fetchVehicles();
     fetchDeletedVehicles();   // ← add this
   }
@@ -553,11 +877,36 @@ const handlePermanentDelete = (vehicleId) => {
   e.preventDefault();
   const { entryType } = visitorForm;
 
-  if (entryType === 'visitor' && (!visitorForm.visitorLastName || !visitorForm.visitorFirstName || !visitorForm.purposeOfVisit)) {
-    showAlert('Please fill in visitor name and purpose', 'error'); return;
+  if (entryType === 'visitor' && (!visitorForm.visitorLastName || !visitorForm.visitorFirstName || !visitorForm.purposeOfVisit || !visitorForm.visitorRelationshipToResident || !visitorForm.visitorIdentification)) {
+    showAlert('Please fill in visitor name, relationship, identification, and purpose', 'error'); return;
   }
   if (entryType === 'delivery' && !visitorForm.deliveryDriverName) {
     showAlert('Please fill in delivery driver name', 'error'); return;
+  }
+
+  if (entryType === 'visitor') {
+    const visitorId = sanitizeIdInput(visitorForm.visitorIdentification, 16);
+    if (!idPattern.test(visitorId)) {
+      showAlert('Visitor Identification ID Number must be letters/numbers only and up to 16 characters.', 'error');
+      return;
+    }
+
+    const relationship = String(visitorForm.visitorRelationshipToResident || '').trim();
+    if (!relationship || relationship.length > 50 || !textOnlyPattern.test(relationship)) {
+      showAlert('Relationship to resident must be text only and up to 50 characters.', 'error');
+      return;
+    }
+
+    if (!visitorIdentificationFile) {
+      showAlert('Please upload the visitor identification image.', 'error');
+      return;
+    }
+
+    const purpose = String(visitorForm.purposeOfVisit || '').trim();
+    if (!purpose || purpose.length > 50 || !purposePattern.test(purpose)) {
+      showAlert('Purpose of visit must be text only and up to 50 characters.', 'error');
+      return;
+    }
   }
 
   const visitorFullName = [
@@ -591,10 +940,20 @@ const handlePermanentDelete = (vehicleId) => {
       const companion = visitorForm.accompanyingVisitors[index];
       const label = `Companion ${index + 1}`;
       const relationshipToResident = String(companion.relationshipToResident || '').trim();
-      const identification = String(companion.identification || '').trim();
+      const identification = sanitizeIdInput(companion.identification, 16);
 
       if (!relationshipToResident || !companion.lastName || !companion.firstName || !identification) {
         showAlert(`Please complete relationship, name, and identification for ${label}`, 'error');
+        return;
+      }
+
+      if (relationshipToResident.length > 40 || !textOnlyPattern.test(relationshipToResident)) {
+        showAlert(`${label} relationship must be text only and up to 40 characters.`, 'error');
+        return;
+      }
+
+      if (!idPattern.test(identification)) {
+        showAlert(`${label} ID number must be letters/numbers only and up to 16 characters.`, 'error');
         return;
       }
 
@@ -627,23 +986,40 @@ const handlePermanentDelete = (vehicleId) => {
 
   setLoading(true);
   try {
+    const visitorIdNumber = sanitizeIdInput(visitorForm.visitorIdentification, 16);
+    const cleanedPurpose = String(visitorForm.purposeOfVisit || '').trim();
+    const cleanedVehicleColor = String(visitorForm.vehicleColor || '').trim();
+    if (cleanedVehicleColor && (cleanedVehicleColor.length > 20 || !textOnlyPattern.test(cleanedVehicleColor))) {
+      showAlert('Vehicle color must be text only and up to 20 characters.', 'error');
+      setLoading(false);
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('entryType', entryType);
+    formData.append('name', nameValidation.value);
+    formData.append('contactNumber', contactValidation.value);
+    formData.append('purpose', entryType === 'visitor' ? cleanedPurpose : 'Delivery');
+    formData.append('relationshipToResident', String(visitorForm.visitorRelationshipToResident || '').trim());
+    formData.append('identificationNumber', visitorIdNumber);
+    formData.append('hostResidentId', user.id);
+    formData.append('hostResidentName', profile?.familyName || user.username);
+    formData.append('hostResidentAddress', `${profile?.houseAddress || ''}, ${profile?.street || ''}`.trim());
+    formData.append('vehiclePlateNumber', sanitizePlateNumberInput(visitorForm.vehiclePlateNumber, 10));
+    formData.append('vehicleType', visitorForm.vehicleType);
+    formData.append('vehicleColor', cleanedVehicleColor);
+    formData.append('accompanyingVisitors', JSON.stringify(entryType === 'visitor' ? normalizedCompanions : []));
+    formData.append('expectedDate', visitorForm.expectedDate);
+    formData.append('preRegisteredBy', user.id);
+
+    if (entryType === 'visitor' && visitorIdentificationFile) {
+      formData.append('identificationFile', visitorIdentificationFile);
+    }
+
     const response = await fetch(apiUrl('/visitors/pre-register'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({
-        name:               nameValidation.value,
-        contactNumber:      contactValidation.value,
-        purpose:            entryType === 'visitor' ? visitorForm.purposeOfVisit  : 'Delivery',
-        hostResidentId:     user.id,
-        hostResidentName:   profile?.familyName || user.username,
-        hostResidentAddress:`${profile?.houseAddress || ''}, ${profile?.street || ''}`.trim(),
-        vehiclePlateNumber: sanitizePlateNumberInput(visitorForm.vehiclePlateNumber, 10),
-        vehicleType:        visitorForm.vehicleType,
-        vehicleColor:       visitorForm.vehicleColor,
-        accompanyingVisitors: entryType === 'visitor' ? normalizedCompanions : [],
-        expectedDate:       visitorForm.expectedDate,
-        preRegisteredBy:    user.id
-      })
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: formData
     });
 
     if (response.ok) {
@@ -651,11 +1027,12 @@ const handlePermanentDelete = (vehicleId) => {
       setVisitorForm({
         entryType: 'visitor',
         visitorLastName: '', visitorFirstName: '', visitorMiddleName: '',
-        visitorContact: '+63', purposeOfVisit: '',
+        visitorContact: '+63', visitorRelationshipToResident: '', visitorIdentification: '', purposeOfVisit: '',
         deliveryDriverName: '', deliveryContact: '+63',
         expectedDate: '', vehiclePlateNumber: '', vehicleType: '', vehicleColor: '',
         accompanyingVisitors: []
       });
+      setVisitorIdentificationFile(null);
       fetchRecentVisitors();
     } else {
       const data = await response.json();
@@ -694,7 +1071,49 @@ const handlePermanentDelete = (vehicleId) => {
   return { hours, minutes, total: remaining };
 };
 
+  const renderVisitorQrAction = (visitor) => {
+    if (visitor.qrEntryEnabled && visitor.qrToken) {
+      return (
+        <>
+          <span className="vr-inline-note qr-approved">QR Approved</span>
+          <button type="button" className="vr-view-qr-btn" onClick={() => setViewingVisitorQr(visitor)}>
+            <Eye size={14} /> View QR
+          </button>
+        </>
+      );
+    }
+
+    if (visitor.reviewStatus === 'pending') {
+      return <span className="vr-inline-note">Waiting for admin review</span>;
+    }
+
+    if (visitor.reviewStatus === 'approved') {
+      return <span className="vr-inline-note">Approved without QR entry</span>;
+    }
+
+    return null;
+  };
+
   // ── Render Content ───────────────────────────────────────────────
+  const filteredRecentVisitors = useMemo(() => {
+    const query = visitorHistoryQuery.trim().toLowerCase();
+
+    return recentVisitors.filter((visitor) => (
+      !query ||
+      String(visitor.name || '').toLowerCase().includes(query) ||
+      String(visitor.hostResidentName || '').toLowerCase().includes(query) ||
+      String(visitor.purpose || '').toLowerCase().includes(query) ||
+      String(visitor.vehiclePlateNumber || '').toLowerCase().includes(query)
+    ));
+  }, [recentVisitors, visitorHistoryQuery]);
+
+  const visitorHistorySummary = useMemo(() => ({
+    total: recentVisitors.length,
+    pending: recentVisitors.filter((visitor) => visitor.reviewStatus === 'pending').length,
+    qrReady: recentVisitors.filter((visitor) => visitor.qrEntryEnabled || getVisitorAccessCode(visitor)).length,
+    inside: recentVisitors.filter((visitor) => visitor.status === 'inside').length
+  }), [recentVisitors]);
+
   const renderContent = () => {
     const accountMeta = getResidentAccountMeta(profile);
     const accessRestricted = isResidentAccessRestricted(profile);
@@ -756,18 +1175,21 @@ const handlePermanentDelete = (vehicleId) => {
                   </div>
                 ) : (
                   <div className="vr-list resident-overview-vr-list">
-                    {recentVisitors.map((visitor) => (
+                    {recentVisitors.slice(0, 5).map((visitor) => (
                       <div key={visitor._id} className="vr-item">
                         <div className="vr-avatar">{visitor.name?.[0]?.toUpperCase() || '?'}</div>
                         <div className="vr-item-info">
                           <div className="vr-item-top">
                             <span className="vr-item-name">{visitor.name}</span>
-                            <span className={`vr-status ${visitor.status === 'inside' ? 'inside' : 'exited'}`}>
-                              {visitor.status === 'inside' ? 'Inside' : 'Exited'}
+                            <span className={`vr-status ${getVisitorStatusTone(visitor)}`}>
+                              {getVisitorStatusLabel(visitor)}
                             </span>
                           </div>
                           <p className="vr-item-purpose">{visitor.purpose}</p>
-                          <p className="vr-item-date">{new Date(visitor.entryTime).toLocaleDateString()}</p>
+                          <p className="vr-item-date">{getVisitorDateLabel(visitor)}</p>
+                          <div className="vr-item-actions">
+                            {renderVisitorQrAction(visitor)}
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -1209,8 +1631,8 @@ const handlePermanentDelete = (vehicleId) => {
     <div>
       <div className="page-header">
         <div className="page-title">
-          <h2>Pre-register Visitor</h2>
-          <p>Notify guards about expected visitors in advance</p>
+          <h2>Pre-Registered Visitors</h2>
+          <p>Create visitor passes and open the QR or visitor code whenever entry scanning is unavailable.</p>
         </div>
       </div>
 
@@ -1291,6 +1713,44 @@ const handlePermanentDelete = (vehicleId) => {
       maxLength={13}
     />
   </div>
+  <div className="form-group">
+    <label>Relationship to Resident *</label>
+    <input
+      type="text"
+      value={visitorForm.visitorRelationshipToResident}
+      onChange={(e) => setVisitorForm({ ...visitorForm, visitorRelationshipToResident: e.target.value.replace(/[^a-zA-Z\s.'-]/g, '').slice(0, 50) })}
+      placeholder="e.g., Cousin"
+      className="form-input"
+      maxLength={50}
+      required
+    />
+  </div>
+  <div className="form-group">
+    <label>Identification ID Number *</label>
+    <input
+      type="text"
+      value={visitorForm.visitorIdentification}
+      onChange={(e) => setVisitorForm({ ...visitorForm, visitorIdentification: sanitizeIdInput(e.target.value, 16) })}
+      placeholder="ID number"
+      className="form-input"
+      maxLength={16}
+      required
+    />
+  </div>
+  <div className="form-group vr-span">
+    <label>Upload Identification *</label>
+    <input
+      key={visitorIdentificationFile ? 'visitor-id-file-selected' : 'visitor-id-file-empty'}
+      type="file"
+      accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+      onChange={(e) => handleVisitorIdentificationFile(e.target.files?.[0] || null)}
+      className="form-input"
+      required
+    />
+    <p className="vr-file-note">
+      {visitorIdentificationFile ? visitorIdentificationFile.name : 'JPG or PNG only. Maximum 3 MB.'}
+    </p>
+  </div>
   <div className="form-group vr-span">
     <label>Purpose of Visit *</label>
     <input
@@ -1330,7 +1790,7 @@ const handlePermanentDelete = (vehicleId) => {
               onChange={(e) => updateAccompanyingVisitor(index, 'relationshipToResident', e.target.value)}
               placeholder="e.g., Cousin"
               className="form-input"
-              maxLength={50}
+              maxLength={40}
             />
           </div>
           <div className="form-group">
@@ -1361,9 +1821,9 @@ const handlePermanentDelete = (vehicleId) => {
               type="text"
               value={companion.identification}
               onChange={(e) => updateAccompanyingVisitor(index, 'identification', e.target.value)}
-              placeholder="ID type / ID number"
+              placeholder="ID number"
               className="form-input"
-              maxLength={80}
+              maxLength={16}
             />
           </div>
         </div>
@@ -1407,7 +1867,7 @@ const handlePermanentDelete = (vehicleId) => {
                   type="datetime-local"
                   value={visitorForm.expectedDate}
                   onChange={(e) => setVisitorForm({ ...visitorForm, expectedDate: e.target.value })}
-                  className="form-input"
+                  className="form-input vr-datetime-input"
                 />
               </div>
 
@@ -1463,36 +1923,175 @@ const handlePermanentDelete = (vehicleId) => {
         </div>
 
         {/* ── Recent Visitors ── */}
-        <div className="vr-sidebar">
+        <div className="vr-sidebar vr-insight-sidebar">
           <div className="vr-sidebar-header">
-            <h3>Recent Visitors</h3>
-            <span className="vr-count">{recentVisitors.length}</span>
+            <h3>Queue Snapshot</h3>
+            <span className="vr-count">{visitorHistorySummary.total}</span>
           </div>
 
-          {recentVisitors.length === 0
-            ? <div className="empty-state-small">
-                <UserCheck size={26} style={{ color: '#9ca3af' }} />
-                <p>No recent visitors</p>
-              </div>
-            : <div className="vr-list">
-                {recentVisitors.map((visitor) => (
-                  <div key={visitor._id} className="vr-item">
-                    <div className="vr-avatar">{visitor.name?.[0]?.toUpperCase() || '?'}</div>
-                    <div className="vr-item-info">
-                      <div className="vr-item-top">
-                        <span className="vr-item-name">{visitor.name}</span>
-                        <span className={`vr-status ${visitor.status === 'inside' ? 'inside' : 'exited'}`}>
-                          {visitor.status === 'inside' ? 'Inside' : 'Exited'}
-                        </span>
-                      </div>
-                      <p className="vr-item-purpose">{visitor.purpose}</p>
-                      <p className="vr-item-date">{new Date(visitor.entryTime).toLocaleDateString()}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>}
+          <div className="vr-snapshot-grid">
+            <div className="vr-snapshot-card">
+              <strong>{visitorHistorySummary.pending}</strong>
+              <span>Pending review</span>
+            </div>
+            <div className="vr-snapshot-card">
+              <strong>{visitorHistorySummary.qrReady}</strong>
+              <span>QR-ready passes</span>
+            </div>
+            <div className="vr-snapshot-card">
+              <strong>{visitorHistorySummary.inside}</strong>
+              <span>Currently inside</span>
+            </div>
+            <div className="vr-snapshot-card">
+              <strong>{Math.max(visitorHistorySummary.total - visitorHistorySummary.pending - visitorHistorySummary.inside, 0)}</strong>
+              <span>Reviewed history</span>
+            </div>
+          </div>
+
+          <div className="vr-sidebar-note">
+            <strong>Resident tip</strong>
+            <p>QR-approved passes are easier for guards to process at the gate, and you can still help with Home Entry and Home Exit from the QR modal.</p>
+          </div>
         </div>
 
+      </div>
+
+      <div className="vr-history-card">
+        <div className="vr-history-head">
+          <div>
+            <h3>Visitor Pass History</h3>
+            <p>Search every pass you created, check approval progress, and reopen QR details when needed.</p>
+          </div>
+          <div className="module-summary-chips">
+            <span className="module-summary-chip info">Total {visitorHistorySummary.total}</span>
+            <span className="module-summary-chip warning">Pending {visitorHistorySummary.pending}</span>
+            <span className="module-summary-chip success">QR Ready {visitorHistorySummary.qrReady}</span>
+            <span className="module-summary-chip neutral">Inside {visitorHistorySummary.inside}</span>
+          </div>
+        </div>
+
+        <div className="module-view-bar vr-history-toolbar">
+          <div className="search-input-group vr-history-search">
+            <Search size={18} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#9ca3af' }} />
+            <input
+              type="text"
+              value={visitorHistoryQuery}
+              onChange={(event) => setVisitorHistoryQuery(event.target.value)}
+              placeholder="Search by visitor, host, purpose, or plate number..."
+              className="search-input"
+              style={{ paddingLeft: '2.75rem' }}
+            />
+          </div>
+          <div className="module-view-toggle">
+            <button
+              type="button"
+              className={`module-view-toggle__btn ${visitorHistoryViewMode === 'card' ? 'active' : ''}`}
+              onClick={() => setVisitorHistoryViewMode('card')}
+            >
+              <LayoutGrid size={16} />
+              <span>Cards</span>
+            </button>
+            <button
+              type="button"
+              className={`module-view-toggle__btn ${visitorHistoryViewMode === 'table' ? 'active' : ''}`}
+              onClick={() => setVisitorHistoryViewMode('table')}
+            >
+              <Table2 size={16} />
+              <span>Table</span>
+            </button>
+          </div>
+        </div>
+
+        {filteredRecentVisitors.length === 0 ? (
+          <div className="empty-state vr-history-empty">
+            <UserCheck size={40} style={{ color: '#9ca3af' }} />
+            <h3>{visitorHistoryQuery ? 'No Matching Visitor Passes' : 'No Visitor Passes Yet'}</h3>
+            <p>{visitorHistoryQuery ? 'Try a different keyword.' : 'Your pre-registered visitors and deliveries will appear here once you create them.'}</p>
+          </div>
+        ) : visitorHistoryViewMode === 'table' ? (
+          <div className="module-table-card">
+            <div className="module-table-wrap">
+              <table className="module-table">
+                <thead>
+                  <tr>
+                    <th>Visitor</th>
+                    <th>Type</th>
+                    <th>Host / Relationship</th>
+                    <th>Schedule</th>
+                    <th>Status</th>
+                    <th>QR / Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRecentVisitors.map((visitor) => (
+                    <tr key={visitor._id}>
+                      <td>
+                        <span className="module-table__primary">{visitor.name}</span>
+                        <span className="module-table__secondary">{visitor.purpose}</span>
+                      </td>
+                      <td>
+                        <span className="module-table__primary">{visitor.entryType === 'delivery' ? 'Delivery' : 'Visitor'}</span>
+                        <span className="module-table__secondary">Party size: {getVisitorPartySize(visitor)}</span>
+                      </td>
+                      <td>
+                        <span className="module-table__primary">{visitor.hostResidentName}</span>
+                        <span className="module-table__secondary">
+                          {visitor.entryType === 'delivery' ? 'Delivery booking' : (visitor.relationshipToResident || 'Relationship not set')}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="module-table__primary">{visitor.expectedDate ? new Date(visitor.expectedDate).toLocaleString() : 'Any time'}</span>
+                        <span className="module-table__secondary">Created {new Date(visitor.createdAt).toLocaleDateString()}</span>
+                      </td>
+                      <td>
+                        <span className={`module-table__pill ${getVisitorStatusTone(visitor)}`}>
+                          {getVisitorStatusLabel(visitor)}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="module-table__action-stack">
+                          {getVisitorAccessCode(visitor) ? (
+                            <span className="module-table__code">{formatVisitorAccessCode(getVisitorAccessCode(visitor))}</span>
+                          ) : (
+                            <span className="module-table__empty">No QR code assigned</span>
+                          )}
+                          <div className="module-table__actions">
+                            {renderVisitorQrAction(visitor) || <span className="module-table__empty">No extra action</span>}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          <div className="vr-history-grid">
+            {filteredRecentVisitors.map((visitor) => (
+              <article key={visitor._id} className="vr-item vr-item--history">
+                <div className="vr-avatar">{visitor.name?.[0]?.toUpperCase() || '?'}</div>
+                <div className="vr-item-info">
+                  <div className="vr-item-top">
+                    <span className="vr-item-name">{visitor.name}</span>
+                    <span className={`vr-status ${getVisitorStatusTone(visitor)}`}>
+                      {getVisitorStatusLabel(visitor)}
+                    </span>
+                  </div>
+                  <p className="vr-item-purpose">{visitor.purpose}</p>
+                  <div className="vr-history-meta">
+                    <span>{visitor.entryType === 'delivery' ? 'Delivery booking' : (visitor.relationshipToResident || 'Relationship not set')}</span>
+                    <span>{visitor.expectedDate ? new Date(visitor.expectedDate).toLocaleString() : 'Any time'}</span>
+                    <span>Party size: {getVisitorPartySize(visitor)}</span>
+                  </div>
+                  <div className="vr-item-actions">
+                    {renderVisitorQrAction(visitor)}
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1577,6 +2176,16 @@ const handlePermanentDelete = (vehicleId) => {
             {renderContent()}
           </div>
         </div>
+        {viewingVisitorQr && (
+          <VisitorQrModal
+            visitor={viewingVisitorQr}
+            onClose={() => setViewingVisitorQr(null)}
+            onForgottenScan={handleForgottenVisitorScan}
+            onCopyCode={handleCopyVisitorCode}
+            onRecordHomeCheckpoint={handleResidentQrCheckpoint}
+            checkpointLoading={loading}
+          />
+        )}
       </main>
     </div>
   );

@@ -25,6 +25,9 @@ exports.createEntryLog = async (req, res) => {
       vehicleType,
       vehicleColor,
       guardOnDuty, 
+      recordedBy,
+      recordedByName,
+      recordedByRole,
       notes,
       residentId,
       residentName,
@@ -65,6 +68,9 @@ exports.createEntryLog = async (req, res) => {
       residentName: residentNameValidation.value,
       residentAddress,
       guardOnDuty,
+      recordedBy: String(recordedBy || '').trim(),
+      recordedByName: String(recordedByName || '').trim(),
+      recordedByRole: String(recordedByRole || '').trim(),
       timestamp: new Date(),
       notes
     });

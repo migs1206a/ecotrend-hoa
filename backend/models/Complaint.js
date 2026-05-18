@@ -28,6 +28,26 @@ const ComplaintSchema = new mongoose.Schema(
       enum: ['person', 'issue'],
       required: true
     },
+    category: {
+      type: String,
+      enum: [
+        'general',
+        'noise_disturbance',
+        'safety_security',
+        'property_damage',
+        'parking',
+        'sanitation',
+        'pets_animals',
+        'harassment',
+        'other'
+      ],
+      default: 'general'
+    },
+    urgency: {
+      type: String,
+      enum: ['low', 'medium', 'high', 'urgent'],
+      default: 'medium'
+    },
     residentId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',

@@ -19,6 +19,7 @@ const ADMIN_MODULES = Object.freeze([
   'cctv',
   'billing',
   'bill_audit_logs',
+  'audit_logs',
   'documents',
   'analytics',
   'ai_chatbot',
@@ -51,28 +52,61 @@ const GUARD_MODULES = Object.freeze([
 
 const OFFICER_MODULE_ACCESS = Object.freeze({
   [OFFICER_POSITIONS.PRESIDENT]: [...ADMIN_MODULES],
-  [OFFICER_POSITIONS.VICE_PRESIDENT]: [...DEFAULT_ASSIGNABLE_ADMIN_MODULES],
-  [OFFICER_POSITIONS.AUDITOR]: [...DEFAULT_ASSIGNABLE_ADMIN_MODULES],
-  [OFFICER_POSITIONS.TREASURER]: [...DEFAULT_ASSIGNABLE_ADMIN_MODULES],
-  [OFFICER_POSITIONS.SECRETARY]: [
+  [OFFICER_POSITIONS.VICE_PRESIDENT]: [
     'overview',
+    'residents',
+    'vehicles',
     'visitors',
     'facilities',
     'complaints',
     'announcements',
     'contact_hoa',
     'cctv',
+    'billing',
+    'audit_logs',
+    'documents',
+    'analytics',
+    'subdivision_map',
+    'reports'
+  ],
+  [OFFICER_POSITIONS.AUDITOR]: [
+    'overview',
+    'billing',
+    'bill_audit_logs',
+    'audit_logs',
+    'analytics',
+    'subdivision_map',
+    'reports'
+  ],
+  [OFFICER_POSITIONS.TREASURER]: [
+    'overview',
+    'residents',
+    'facilities',
+    'billing',
+    'bill_audit_logs',
+    'audit_logs',
+    'analytics',
+    'subdivision_map',
+    'reports'
+  ],
+  [OFFICER_POSITIONS.SECRETARY]: [
+    'overview',
+    'residents',
+    'visitors',
+    'announcements',
+    'contact_hoa',
+    'audit_logs',
     'subdivision_map',
     'documents',
     'reports'
   ],
   [OFFICER_POSITIONS.BOARD_MEMBER]: [
     'overview',
+    'residents',
     'visitors',
     'facilities',
     'complaints',
     'announcements',
-    'contact_hoa',
     'cctv',
     'subdivision_map',
     'reports'
@@ -166,6 +200,25 @@ const getAllowedModulesForRole = (role) => {
   return [];
 };
 
+const getLockedModulesForRole = (role, position = '') => {
+  const normalizedRole = String(role || '').toUpperCase();
+
+  if (normalizedRole === 'MASTER_ADMIN') {
+    return [...ADMIN_MODULES];
+  }
+
+  if (normalizedRole === 'ADMIN') {
+    const normalizedPosition = normalizeOfficerPosition(position);
+    return [...(OFFICER_MODULE_ACCESS[normalizedPosition] || DEFAULT_ASSIGNABLE_ADMIN_MODULES)];
+  }
+
+  if (normalizedRole === 'GUARD') {
+    return [...GUARD_MODULES];
+  }
+
+  return [];
+};
+
 const normalizeModules = (modules, role, position = '') => {
   const normalizedRole = String(role || '').toUpperCase();
 
@@ -175,24 +228,17 @@ const normalizeModules = (modules, role, position = '') => {
 
   const allowedModules = getAllowedModulesForRole(normalizedRole);
   const fallbackModules = getDefaultModulesForRole(normalizedRole, position);
+  const lockedModules = uniqueModules(
+    getLockedModulesForRole(normalizedRole, position).filter((moduleKey) =>
+      allowedModules.includes(moduleKey)
+    )
+  );
   const sourceModules = Array.isArray(modules) && modules.length > 0 ? modules : fallbackModules;
   const normalizedModules = uniqueModules(
     sourceModules.filter((moduleKey) => allowedModules.includes(moduleKey))
   );
 
-  ['overview', 'subdivision_map'].forEach((moduleKey) => {
-    if (!allowedModules.includes(moduleKey) || normalizedModules.includes(moduleKey)) {
-      return;
-    }
-
-    if (moduleKey === 'overview') {
-      normalizedModules.unshift(moduleKey);
-    } else {
-      normalizedModules.push(moduleKey);
-    }
-  });
-
-  return normalizedModules;
+  return uniqueModules([...lockedModules, ...normalizedModules]);
 };
 
 const getEffectiveModules = (user) =>
@@ -245,6 +291,7 @@ module.exports = {
   ADMIN_MODULES,
   ASSIGNABLE_ADMIN_MODULES,
   GUARD_MODULES,
+  getLockedModulesForRole,
   OFFICER_MODULE_ACCESS,
   OFFICER_POSITIONS,
   getAllowedModulesForRole,

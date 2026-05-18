@@ -11,13 +11,16 @@ const {
 const {
   createFacility,
   getAllReservations,
+  getReservationCalendar,
   getMyReservations,
   getFacilitySettings,
   createReservation,
   deleteFacility,
   uploadReceipt,
   approveReservation,
+  markForgottenFacilityGuestCheckpoint,
   rejectReservation,
+  scanFacilityGuestQr,
   updateFacility,
   verifyPayment,
   updateGcashQr,
@@ -74,8 +77,26 @@ router.put('/settings/gcash-qr', auth, requireOfficerModule('facilities'), qrUpl
 router.post('/settings/facilities', auth, requireOfficerModule('facilities'), facilityPhotoUpload.single('photo'), createFacility);
 router.put('/settings/facilities/:facilityId', auth, requireOfficerModule('facilities'), facilityPhotoUpload.single('photo'), updateFacility);
 router.delete('/settings/facilities/:facilityId', auth, requireOfficerModule('facilities'), deleteFacility);
+router.get(
+  '/calendar',
+  auth,
+  requireAccess({
+    roles: ['RESIDENT', 'GUARD'],
+    modules: ['facilities']
+  }),
+  getReservationCalendar
+);
 router.get('/my-reservations', auth, requireRoles('RESIDENT'), getMyReservations);
 router.post('/reserve', auth, requireRoles('RESIDENT'), createReservation);
+router.post(
+  '/qr/scan',
+  auth,
+  requireAccess({
+    roles: ['GUARD'],
+    modules: ['facilities']
+  }),
+  scanFacilityGuestQr
+);
 router.post('/:id/upload-receipt', auth, requireRoles('RESIDENT'), receiptUpload.single('receipt'), uploadReceipt);
 router.get(
   '/all',
@@ -85,6 +106,15 @@ router.get(
     modules: ['facilities']
   }),
   getAllReservations
+);
+router.post(
+  '/:id/qr/forgot',
+  auth,
+  requireAccess({
+    roles: ['GUARD'],
+    modules: ['facilities']
+  }),
+  markForgottenFacilityGuestCheckpoint
 );
 router.patch('/:id/approve', auth, requireOfficerModule('facilities'), approveReservation);
 router.patch('/:id/reject', auth, requireOfficerModule('facilities'), rejectReservation);

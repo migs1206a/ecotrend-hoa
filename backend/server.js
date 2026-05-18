@@ -5,6 +5,8 @@ const path = require('path');
 const fs = require('fs');
 const dns = require('dns');
 const { getFileSizeLimitMessage } = require('./utils/uploadLimits');
+const { createAdminAuditLogger } = require('./utils/adminAuditLog');
+const { backfillAdminAuditLogExpiry } = require('./controllers/adminAuditLogController');
 require('dotenv').config();
 
 const configuredDnsServers = String(process.env.DNS_SERVERS || '')
@@ -42,11 +44,14 @@ app.use(cors({
   }
 }));
 app.use(express.json());
+app.use(createAdminAuditLogger());
 
 // Create uploads directories if they don't exist
 const uploadsDirectories = [
   path.join(__dirname, 'uploads/identification'),
+  path.join(__dirname, 'uploads/visitor-identifications'),
   path.join(__dirname, 'uploads/vehicles'),
+  path.join(__dirname, 'uploads/audit-log-archives'),
   path.join(__dirname, 'report-archives')
 ];
 
@@ -62,9 +67,23 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // MongoDB Connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/ecotrend_housing';
+const FacilityReservation = require('./models/FacilityReservation');
 
 mongoose.connect(MONGODB_URI)
-  .then(() => console.log('✓ Connected to MongoDB'))
+  .then(async () => {
+    console.log('✓ Connected to MongoDB');
+
+    try {
+      const droppedIndexName = await FacilityReservation.dropLegacyExpirationIndex();
+      if (droppedIndexName) {
+        console.log(`Dropped legacy facility reservation TTL index: ${droppedIndexName}`);
+      }
+    } catch (error) {
+      console.error('Unable to drop legacy facility reservation TTL index:', error.message);
+    }
+
+    await backfillAdminAuditLogExpiry();
+  })
   .catch((err) => console.error('MongoDB connection error:', err));
 
 // Import Routes
@@ -94,6 +113,7 @@ app.use('/api/facilities', require('./routes/facilities'));
 app.use('/api/complaints', require('./routes/complaints'));
 app.use('/api/documents', require('./routes/documents'));
 app.use('/api/admin-bill-audit-logs', require('./routes/adminBillAuditLogs'));
+app.use('/api/admin-audit-logs', require('./routes/adminAuditLogs'));
 app.use('/api/contact-hoa', require('./routes/contactHoa'));
 app.use('/api/cctv-feeds', require('./routes/cctvFeeds'));
 app.use('/api/reports', require('./routes/reports'));

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertCircle,
   Calendar,
@@ -6,13 +7,14 @@ import {
   Clock3,
   Eye,
   ImagePlus,
+  LayoutGrid,
   Landmark,
-  MapPin,
   Pencil,
   PhilippinePeso,
   PlusCircle,
   QrCode,
   Search,
+  Table2,
   Trash2,
   Upload,
   Users,
@@ -22,6 +24,7 @@ import { apiUrl, assetUrl } from '../../utils/api';
 import './AdminFacilityManagement.css';
 import PaginationControls from '../common/PaginationControls';
 import { buildPaginatedUrl, parsePaginatedResponse } from '../../utils/pagination';
+import FacilityReservationCalendar from './FacilityReservationCalendar';
 import {
   IMAGE_UPLOAD_MAX_BYTES,
   formatFileSize,
@@ -29,6 +32,19 @@ import {
 } from '../../utils/uploadValidation';
 
 const formatDateTime = (value) => new Date(value).toLocaleString();
+const getMonthRange = (date) => ({
+  start: new Date(date.getFullYear(), date.getMonth(), 1),
+  end: new Date(date.getFullYear(), date.getMonth() + 1, 1)
+});
+const getDateKey = (value) => {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
 
 const emptyFacilityForm = {
   id: '',
@@ -42,6 +58,35 @@ const emptyFacilityForm = {
 };
 
 const clampMapValue = (value, min, max) => Math.min(Math.max(Number(value) || 0, min), max);
+
+const sanitizeFacilityNameInput = (value) =>
+  String(value || '')
+    .replace(/[^A-Za-z\s]/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trimStart();
+
+const normalizeFacilityName = (value) =>
+  sanitizeFacilityNameInput(value).trim().replace(/\s+/g, ' ');
+
+const isValidFacilityName = (value) => /^[A-Za-z]+(?:\s+[A-Za-z]+)*$/.test(value);
+
+const sanitizeHourlyRateInput = (value) => {
+  const cleanValue = String(value || '').replace(/[^\d.]/g, '');
+  const [wholePart, ...decimalParts] = cleanValue.split('.');
+  const decimalPart = decimalParts.join('').slice(0, 2);
+
+  if (!cleanValue.includes('.')) {
+    return wholePart;
+  }
+
+  return `${wholePart || '0'}.${decimalPart}`;
+};
+
+const preventNegativePriceInput = (event) => {
+  if (['-', '+', 'e', 'E'].includes(event.key)) {
+    event.preventDefault();
+  }
+};
 
 const AdminFacilityManagement = ({ token }) => {
   const [activePanel, setActivePanel] = useState('facilities');
@@ -59,10 +104,16 @@ const AdminFacilityManagement = ({ token }) => {
   const [rejectReason, setRejectReason] = useState('');
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(null);
+  const [reservationsViewMode, setReservationsViewMode] = useState('card');
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const [calendarReservations, setCalendarReservations] = useState([]);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [calendarSelectedDate, setCalendarSelectedDate] = useState(getDateKey(new Date()));
 
   const [facilityForm, setFacilityForm] = useState(emptyFacilityForm);
   const [facilitySaving, setFacilitySaving] = useState(false);
   const [facilityError, setFacilityError] = useState('');
+  const [showFacilityModal, setShowFacilityModal] = useState(false);
 
   const facilities = useMemo(
     () => (Array.isArray(settings?.facilities) ? settings.facilities : []),
@@ -72,7 +123,11 @@ const AdminFacilityManagement = ({ token }) => {
   const fetchReservations = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch(apiUrl(buildPaginatedUrl('/facilities/all', page)), {
+      const response = await fetch(apiUrl(buildPaginatedUrl('/facilities/all', page, {
+        search: searchQuery,
+        status: statusFilter,
+        facilityId: facilityFilter
+      })), {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -86,7 +141,7 @@ const AdminFacilityManagement = ({ token }) => {
       console.error('Error fetching reservations:', error);
     }
     setLoading(false);
-  }, [page, token]);
+  }, [facilityFilter, page, searchQuery, statusFilter, token]);
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -103,6 +158,36 @@ const AdminFacilityManagement = ({ token }) => {
     }
   }, [token]);
 
+  const fetchCalendarReservations = useCallback(async () => {
+    const { start, end } = getMonthRange(calendarMonth);
+    const calendarStatus = statusFilter === 'all' ? 'upcoming' : statusFilter;
+
+    setCalendarLoading(true);
+
+    try {
+      const response = await fetch(apiUrl(`/facilities/calendar?${new URLSearchParams({
+        start: start.toISOString(),
+        end: end.toISOString(),
+        status: calendarStatus,
+        facilityId: facilityFilter || 'all'
+      }).toString()}`), {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setCalendarReservations(Array.isArray(data) ? data : []);
+      } else {
+        setCalendarReservations([]);
+      }
+    } catch (error) {
+      console.error('Error fetching reservation calendar:', error);
+      setCalendarReservations([]);
+    }
+
+    setCalendarLoading(false);
+  }, [calendarMonth, facilityFilter, statusFilter, token]);
+
   useEffect(() => {
     fetchSettings();
   }, [fetchSettings]);
@@ -113,9 +198,34 @@ const AdminFacilityManagement = ({ token }) => {
     }
 
     fetchReservations();
-    const interval = setInterval(fetchReservations, 30000);
+    fetchCalendarReservations();
+    const interval = setInterval(() => {
+      fetchReservations();
+      fetchCalendarReservations();
+    }, 30000);
     return () => clearInterval(interval);
-  }, [activePanel, fetchReservations]);
+  }, [activePanel, fetchCalendarReservations, fetchReservations]);
+
+  useEffect(() => {
+    if (activePanel !== 'reservations') {
+      return;
+    }
+
+    fetchCalendarReservations();
+  }, [activePanel, fetchCalendarReservations]);
+
+  useEffect(() => {
+    const selectedDate = new Date(`${calendarSelectedDate}T00:00:00`);
+
+    if (
+      !calendarSelectedDate ||
+      Number.isNaN(selectedDate.getTime()) ||
+      selectedDate.getMonth() !== calendarMonth.getMonth() ||
+      selectedDate.getFullYear() !== calendarMonth.getFullYear()
+    ) {
+      setCalendarSelectedDate(getDateKey(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1)));
+    }
+  }, [calendarMonth, calendarSelectedDate]);
 
   useEffect(() => {
     if (facilityFilter !== 'all' && !facilities.some((facility) => facility._id === facilityFilter)) {
@@ -123,9 +233,25 @@ const AdminFacilityManagement = ({ token }) => {
     }
   }, [facilities, facilityFilter]);
 
+  useEffect(() => {
+    if (activePanel === 'reservations') {
+      setPage(1);
+    }
+  }, [activePanel, facilityFilter, searchQuery, statusFilter]);
+
   const resetFacilityForm = () => {
     setFacilityForm(emptyFacilityForm);
     setFacilityError('');
+  };
+
+  const closeFacilityModal = () => {
+    setShowFacilityModal(false);
+    resetFacilityForm();
+  };
+
+  const openCreateFacilityModal = () => {
+    resetFacilityForm();
+    setShowFacilityModal(true);
   };
 
   const openReservationsPanel = () => {
@@ -277,7 +403,7 @@ const AdminFacilityManagement = ({ token }) => {
   const startEditFacility = (facility) => {
     setFacilityForm({
       id: facility._id,
-      name: facility.name || '',
+      name: sanitizeFacilityNameInput(facility.name || ''),
       description: facility.description || '',
       hourlyRate: String(facility.hourlyRate ?? 0),
       mapX: String(facility.mapPosition?.x ?? 0),
@@ -286,14 +412,20 @@ const AdminFacilityManagement = ({ token }) => {
       currentPhoto: facility.photo || null
     });
     setFacilityError('');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setShowFacilityModal(true);
   };
 
   const handleFacilitySubmit = async () => {
-    const trimmedName = String(facilityForm.name || '').trim();
+    const trimmedName = normalizeFacilityName(facilityForm.name);
+    const hourlyRate = Number(facilityForm.hourlyRate || 0);
 
     if (trimmedName.length < 2) {
       setFacilityError('Facility name must be at least 2 characters.');
+      return;
+    }
+
+    if (!isValidFacilityName(trimmedName)) {
+      setFacilityError('Facility name can only contain letters and spaces.');
       return;
     }
 
@@ -302,7 +434,7 @@ const AdminFacilityManagement = ({ token }) => {
       return;
     }
 
-    if (Number(facilityForm.hourlyRate) < 0) {
+    if (!Number.isFinite(hourlyRate) || hourlyRate < 0) {
       setFacilityError('Facility price must be 0 or higher.');
       return;
     }
@@ -313,7 +445,7 @@ const AdminFacilityManagement = ({ token }) => {
     const payload = new FormData();
     payload.append('name', trimmedName);
     payload.append('description', String(facilityForm.description || '').trim());
-    payload.append('hourlyRate', String(Number(facilityForm.hourlyRate) || 0));
+    payload.append('hourlyRate', String(hourlyRate || 0));
     payload.append('mapX', String(clampMapValue(facilityForm.mapX, -4.85, 4.85)));
     payload.append('mapZ', String(clampMapValue(facilityForm.mapZ, -2.85, 2.85)));
     if (facilityForm.photoFile) {
@@ -342,7 +474,7 @@ const AdminFacilityManagement = ({ token }) => {
       }
 
       window.alert(isEditing ? 'Facility updated successfully.' : 'Facility created successfully.');
-      resetFacilityForm();
+      closeFacilityModal();
       fetchSettings();
     } catch (error) {
       setFacilityError(error.message || 'Failed to save facility.');
@@ -371,7 +503,7 @@ const AdminFacilityManagement = ({ token }) => {
       window.alert('Facility deleted successfully.');
 
       if (facilityForm.id === facility._id) {
-        resetFacilityForm();
+        closeFacilityModal();
       }
 
       fetchSettings();
@@ -430,6 +562,26 @@ const AdminFacilityManagement = ({ token }) => {
     [facilityFilter, reservations, searchQuery, statusFilter]
   );
 
+  const calendarFilteredReservations = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    return calendarReservations.filter((reservation) => {
+      if (!query) {
+        return true;
+      }
+
+      const facilityName = reservation.facility?.name || reservation.facilityName || '';
+
+      return [
+        reservation.residentName,
+        reservation.residentAddress,
+        facilityName,
+        reservation.eventType,
+        reservation.purpose
+      ].some((value) => String(value || '').toLowerCase().includes(query));
+    });
+  }, [calendarReservations, searchQuery]);
+
   const reservationStats = useMemo(
     () => ({
       total: reservations.length,
@@ -452,6 +604,9 @@ const AdminFacilityManagement = ({ token }) => {
   );
 
   const isReservationsView = activePanel === 'reservations';
+  const renderFacilityPortal = (content) => (
+    typeof document !== 'undefined' ? createPortal(content, document.body) : null
+  );
 
   return (
     <div className="facility-admin-shell">
@@ -512,9 +667,9 @@ const AdminFacilityManagement = ({ token }) => {
                   <span>Free</span>
                 </div>
               </div>
-              <button type="button" className="facility-admin-inline-btn facility-admin-create-btn" onClick={resetFacilityForm}>
+              <button type="button" className="facility-admin-inline-btn facility-admin-create-btn" onClick={openCreateFacilityModal}>
                 <PlusCircle size={15} />
-                New Facility
+                Add Facility
               </button>
             </div>
           </div>
@@ -523,7 +678,7 @@ const AdminFacilityManagement = ({ token }) => {
             <div className="facility-admin-empty-state">
               <Landmark size={38} />
               <h4>No facilities yet</h4>
-              <p>Add the first facility from the editor panel to open reservations.</p>
+              <p>Use the Add Facility button to publish the first reservable space.</p>
             </div>
           ) : (
             <div className="facility-admin-library-grid">
@@ -547,13 +702,8 @@ const AdminFacilityManagement = ({ token }) => {
                         <p>{facility.description || 'No description added yet.'}</p>
                       </div>
                       <span className={`facility-admin-rate-pill ${Number(facility.hourlyRate) > 0 ? 'paid' : 'free'}`}>
-                        {Number(facility.hourlyRate) > 0 ? `P${facility.hourlyRate}/hr` : 'Free'}
+                        {Number(facility.hourlyRate) > 0 ? `₱${facility.hourlyRate}/hr` : 'Free'}
                       </span>
-                    </div>
-
-                    <div className="facility-admin-map-chip">
-                      <MapPin size={13} />
-                      <span>Map X {facility.mapPosition?.x ?? 0}, Z {facility.mapPosition?.z ?? 0}</span>
                     </div>
 
                     <div className="facility-admin-library-actions">
@@ -571,129 +721,6 @@ const AdminFacilityManagement = ({ token }) => {
               ))}
             </div>
           )}
-        </section>
-
-        <section className="facility-admin-editor-card">
-          <div className="facility-admin-editor-head">
-            <div>
-              <h3>{facilityForm.id ? 'Edit Facility' : 'Add Facility'}</h3>
-              <p>Set the name, hourly rate, description, and cover image. Use `0` to make a facility free.</p>
-            </div>
-            {facilityForm.id && (
-              <button type="button" className="facility-admin-inline-btn" onClick={resetFacilityForm}>
-                <XCircle size={15} />
-                Cancel Edit
-              </button>
-            )}
-          </div>
-
-          {facilityError && <div className="facility-admin-form-error">{facilityError}</div>}
-
-          <div className="facility-admin-editor-grid">
-            <label className="facility-admin-field">
-              <span>Facility Name</span>
-              <input
-                type="text"
-                className="form-input"
-                value={facilityForm.name}
-                onChange={(event) => setFacilityForm((previous) => ({ ...previous, name: event.target.value }))}
-                placeholder="Example: Clubhouse"
-              />
-            </label>
-
-            <label className="facility-admin-field">
-              <span>Hourly Price</span>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                className="form-input"
-                value={facilityForm.hourlyRate}
-                onChange={(event) => setFacilityForm((previous) => ({ ...previous, hourlyRate: event.target.value }))}
-                placeholder="0"
-              />
-            </label>
-
-            <label className="facility-admin-field facility-admin-field-span">
-              <span>Description</span>
-              <textarea
-                className="form-textarea"
-                rows="4"
-                value={facilityForm.description}
-                onChange={(event) => setFacilityForm((previous) => ({ ...previous, description: event.target.value }))}
-                placeholder="Share what the facility is used for, house rules, or setup notes."
-              />
-            </label>
-
-            <div className="facility-admin-map-fields facility-admin-field-span">
-              <div className="facility-admin-map-head">
-                <MapPin size={16} />
-                <div>
-                  <strong>3D Map Position</strong>
-                  <span>Move the facility marker across the subdivision map.</span>
-                </div>
-              </div>
-
-              <label className="facility-admin-range-field">
-                <span>West / East</span>
-                <input
-                  type="range"
-                  min="-4.85"
-                  max="4.85"
-                  step="0.05"
-                  value={facilityForm.mapX}
-                  onChange={(event) => setFacilityForm((previous) => ({ ...previous, mapX: event.target.value }))}
-                />
-                <strong>{Number(facilityForm.mapX || 0).toFixed(2)}</strong>
-              </label>
-
-              <label className="facility-admin-range-field">
-                <span>North / South</span>
-                <input
-                  type="range"
-                  min="-2.85"
-                  max="2.85"
-                  step="0.05"
-                  value={facilityForm.mapZ}
-                  onChange={(event) => setFacilityForm((previous) => ({ ...previous, mapZ: event.target.value }))}
-                />
-                <strong>{Number(facilityForm.mapZ || 0).toFixed(2)}</strong>
-              </label>
-            </div>
-
-            <div className="facility-admin-photo-panel">
-              <div className="facility-admin-photo-preview">
-                {facilityForm.photoFile ? (
-                  <div className="facility-admin-photo-note">
-                    <ImagePlus size={18} />
-                    <span>{facilityForm.photoFile.name}</span>
-                  </div>
-                ) : facilityForm.currentPhoto?.path ? (
-                  <img src={assetUrl(facilityForm.currentPhoto.path)} alt="Current facility" className="facility-admin-photo-current" />
-                ) : (
-                  <div className="facility-admin-library-placeholder">
-                    <ImagePlus size={22} />
-                    <span>No photo selected</span>
-                  </div>
-                )}
-              </div>
-
-              <label className="file-label facility-admin-file-label">
-                <Upload size={16} />
-                {facilityForm.photoFile?.name || `Choose Facility Photo (max ${formatFileSize(IMAGE_UPLOAD_MAX_BYTES)})`}
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="file-input"
-                  onChange={handleFacilityPhotoChange}
-                />
-              </label>
-            </div>
-          </div>
-
-          <button type="button" className="upload-btn facility-admin-upload-btn" onClick={handleFacilitySubmit} disabled={facilitySaving}>
-            {facilitySaving ? 'Saving...' : facilityForm.id ? 'Save Facility Changes' : 'Add Facility'}
-          </button>
         </section>
       </div>
 
@@ -852,10 +879,37 @@ const AdminFacilityManagement = ({ token }) => {
             <option value="rejected">Rejected</option>
             <option value="expired">Expired</option>
           </select>
+          <div className="module-view-toggle">
+            <button type="button" className={`module-view-toggle__btn ${reservationsViewMode === 'card' ? 'active' : ''}`} onClick={() => setReservationsViewMode('card')}>
+              <LayoutGrid size={16} />
+              <span>Cards</span>
+            </button>
+            <button type="button" className={`module-view-toggle__btn ${reservationsViewMode === 'table' ? 'active' : ''}`} onClick={() => setReservationsViewMode('table')}>
+              <Table2 size={16} />
+              <span>Table</span>
+            </button>
+            <button type="button" className={`module-view-toggle__btn ${reservationsViewMode === 'calendar' ? 'active' : ''}`} onClick={() => setReservationsViewMode('calendar')}>
+              <Calendar size={16} />
+              <span>Calendar</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {loading && reservations.length === 0 ? (
+      {reservationsViewMode === 'calendar' ? (
+        <FacilityReservationCalendar
+          events={calendarFilteredReservations}
+          loading={calendarLoading}
+          monthDate={calendarMonth}
+          onMonthChange={setCalendarMonth}
+          selectedDateKey={calendarSelectedDate}
+          onDateSelect={setCalendarSelectedDate}
+          showResidentDetails
+          title="Active Booking Calendar"
+          description="Pending and approved reservations stay visible here so admins can spot crowding and prevent accidental double-booking."
+          emptyDayCopy="No active reservations are scheduled for this day."
+        />
+      ) : loading && reservations.length === 0 ? (
         <div className="loading-state">
           <div className="spinner" />
           <p>Loading facility reservations...</p>
@@ -865,6 +919,96 @@ const AdminFacilityManagement = ({ token }) => {
           <Landmark size={46} />
           <h3>No Reservations Found</h3>
           <p>{searchQuery || statusFilter !== 'all' || facilityFilter !== 'all' ? 'Try adjusting the search or filters.' : 'Facility reservations will show up here once residents start booking.'}</p>
+        </div>
+      ) : reservationsViewMode === 'table' ? (
+        <div className="module-table-card">
+          <div className="module-table-wrap">
+            <table className="module-table">
+              <thead>
+                <tr>
+                  <th>Facility</th>
+                  <th>Resident</th>
+                  <th>Schedule</th>
+                  <th>Guests / Purpose</th>
+                  <th>Payment</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredReservations.map((reservation) => {
+                  const statusMeta = getStatusMeta(reservation.status);
+                  const paymentMeta = getPaymentMeta(reservation);
+                  const canApprove = reservation.status === 'pending' && (!reservation.paymentRequired || reservation.isPaid);
+                  const canVerify = reservation.status === 'pending' && reservation.paymentRequired && reservation.paymentStatus === 'pending';
+                  const facilityName = reservation.facility?.name || reservation.facilityName;
+
+                  return (
+                    <tr key={reservation._id}>
+                      <td>
+                        <span className="module-table__primary">{facilityName}</span>
+                        <span className="module-table__secondary">{reservation.eventType}</span>
+                      </td>
+                      <td>
+                        <span className="module-table__primary">{reservation.residentName}</span>
+                        <span className="module-table__secondary">{reservation.residentAddress}</span>
+                      </td>
+                      <td>
+                        <span className="module-table__primary">{formatDateTime(reservation.dateReserved)}</span>
+                        <span className="module-table__secondary">{reservation.durationHours} hour{reservation.durationHours > 1 ? 's' : ''}</span>
+                      </td>
+                      <td>
+                        <span className="module-table__primary">{reservation.numberOfGuests || 0} guest(s)</span>
+                        <span className="module-table__notes">{reservation.purpose}</span>
+                      </td>
+                      <td>
+                        <span className="module-table__primary">{paymentMeta.label}</span>
+                        <span className="module-table__secondary">
+                          {reservation.paymentRequired ? `PHP ${reservation.totalAmount} (${reservation.hourlyRate}/hr)` : 'No payment required'}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`module-table__pill ${reservation.status === 'approved' ? 'success' : reservation.status === 'rejected' || reservation.status === 'expired' ? 'danger' : 'pending'}`}>
+                          {statusMeta.label}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="module-table__actions">
+                          {reservation.paymentReceipt?.path && (
+                            <button type="button" className="module-table__action-btn secondary" onClick={() => setViewingReceipt(reservation)}>
+                              <Eye size={14} /> Receipt
+                            </button>
+                          )}
+                          {canVerify && (
+                            <button type="button" className="module-table__action-btn info" onClick={() => handleVerifyPayment(reservation._id)}>
+                              Verify
+                            </button>
+                          )}
+                          {canApprove && (
+                            <button type="button" className="module-table__action-btn success" onClick={() => handleApprove(reservation._id)}>
+                              Approve
+                            </button>
+                          )}
+                          {reservation.status === 'pending' && (
+                            <button
+                              type="button"
+                              className="module-table__action-btn danger"
+                              onClick={() => {
+                                setReservationsViewMode('card');
+                                setRejectingId(reservation._id);
+                              }}
+                            >
+                              Reject
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : (
         <div className="facility-admin-grid">
@@ -932,7 +1076,7 @@ const AdminFacilityManagement = ({ token }) => {
                       <PhilippinePeso size={16} />
                       <div>
                         <strong>Charge</strong>
-                        <p>{reservation.paymentRequired ? `P${reservation.totalAmount} (${reservation.hourlyRate}/hr)` : 'Free'}</p>
+                        <p>{reservation.paymentRequired ? `₱${reservation.totalAmount} (${reservation.hourlyRate}/hr)` : 'Free'}</p>
                       </div>
                     </div>
                   </div>
@@ -1009,12 +1153,14 @@ const AdminFacilityManagement = ({ token }) => {
         </div>
       )}
 
-            <PaginationControls pagination={pagination} onPageChange={setPage} />
+            {reservationsViewMode !== 'calendar' && (
+              <PaginationControls pagination={pagination} onPageChange={setPage} />
+            )}
           </div>
         </>
       )}
 
-      {viewingReceipt && (
+      {viewingReceipt && renderFacilityPortal(
         <div className="modal-overlay" onClick={() => setViewingReceipt(null)}>
           <div className="modal-content" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
@@ -1034,7 +1180,7 @@ const AdminFacilityManagement = ({ token }) => {
         </div>
       )}
 
-      {viewingQr && settings?.gcashQr?.path && (
+      {viewingQr && settings?.gcashQr?.path && renderFacilityPortal(
         <div className="modal-overlay" onClick={() => setViewingQr(false)}>
           <div className="modal-content" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
@@ -1045,6 +1191,103 @@ const AdminFacilityManagement = ({ token }) => {
             </div>
             <div className="modal-body">
               <img src={assetUrl(settings.gcashQr.path)} alt="Facility GCash QR" className="receipt-image" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFacilityModal && renderFacilityPortal(
+        <div className="modal-overlay" onClick={closeFacilityModal}>
+          <div className="modal-content facility-admin-facility-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <div className="facility-admin-facility-modal-copy">
+                <h3>{facilityForm.id ? 'Edit Facility' : 'Add Facility'}</h3>
+                <p>Set the name, hourly rate, description, and cover image. Use `0` to make a facility free.</p>
+              </div>
+              <button onClick={closeFacilityModal} className="modal-close">
+                <XCircle size={24} />
+              </button>
+            </div>
+
+            <div className="facility-admin-facility-modal-body">
+              {facilityError && <div className="facility-admin-form-error">{facilityError}</div>}
+
+              <div className="facility-admin-editor-grid">
+                <label className="facility-admin-field">
+                  <span>Facility Name</span>
+                  <input
+                    type="text"
+                    className="form-input"
+                    maxLength="80"
+                    pattern="[A-Za-z ]*"
+                    value={facilityForm.name}
+                    onChange={(event) => setFacilityForm((previous) => ({ ...previous, name: sanitizeFacilityNameInput(event.target.value) }))}
+                    placeholder="Example: Clubhouse"
+                  />
+                </label>
+
+                <label className="facility-admin-field">
+                  <span>Hourly Price</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    className="form-input"
+                    value={facilityForm.hourlyRate}
+                    onKeyDown={preventNegativePriceInput}
+                    onChange={(event) => setFacilityForm((previous) => ({ ...previous, hourlyRate: sanitizeHourlyRateInput(event.target.value) }))}
+                    placeholder="0"
+                  />
+                </label>
+
+                <label className="facility-admin-field facility-admin-field-span">
+                  <span>Description</span>
+                  <textarea
+                    className="form-textarea"
+                    rows="4"
+                    value={facilityForm.description}
+                    onChange={(event) => setFacilityForm((previous) => ({ ...previous, description: event.target.value }))}
+                    placeholder="Share what the facility is used for, house rules, or setup notes."
+                  />
+                </label>
+
+                <div className="facility-admin-photo-panel">
+                  <div className="facility-admin-photo-preview">
+                    {facilityForm.photoFile ? (
+                      <div className="facility-admin-photo-note">
+                        <ImagePlus size={18} />
+                        <span>{facilityForm.photoFile.name}</span>
+                      </div>
+                    ) : facilityForm.currentPhoto?.path ? (
+                      <img src={assetUrl(facilityForm.currentPhoto.path)} alt="Current facility" className="facility-admin-photo-current" />
+                    ) : (
+                      <div className="facility-admin-library-placeholder">
+                        <ImagePlus size={22} />
+                        <span>No photo selected</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <label className="file-label facility-admin-file-label">
+                    <Upload size={16} />
+                    {facilityForm.photoFile?.name || `Choose Facility Photo (max ${formatFileSize(IMAGE_UPLOAD_MAX_BYTES)})`}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="file-input"
+                      onChange={handleFacilityPhotoChange}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="facility-admin-editor-actions">
+                <button type="button" className="facility-admin-inline-btn" onClick={closeFacilityModal}>
+                  Cancel
+                </button>
+                <button type="button" className="upload-btn facility-admin-upload-btn" onClick={handleFacilitySubmit} disabled={facilitySaving}>
+                  {facilitySaving ? 'Saving...' : facilityForm.id ? 'Save Facility Changes' : 'Add Facility'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

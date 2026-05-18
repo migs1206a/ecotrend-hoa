@@ -4,9 +4,43 @@
   gap: 1rem;
 }
 
+.admin-bill-audit-page-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.admin-bill-audit-download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.82rem 1rem;
+  border: 1px solid rgba(13, 148, 136, 0.16);
+  border-radius: var(--radius-xl);
+  background: linear-gradient(135deg, rgba(13, 148, 136, 0.1), rgba(16, 185, 129, 0.12));
+  color: #0f766e;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 800;
+  transition: all 0.2s ease;
+}
+
+.admin-bill-audit-download:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(13, 148, 136, 0.12);
+}
+
+.admin-bill-audit-download:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
 .admin-bill-audit-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1rem;
 }
 
@@ -45,6 +79,11 @@
 .admin-bill-audit-icon.accent {
   background: #fef3c7;
   color: #b45309;
+}
+
+.admin-bill-audit-icon.success {
+  background: #ecfdf5;
+  color: #047857;
 }
 
 .admin-bill-audit-card p {
@@ -157,6 +196,13 @@
   transition: all 0.2s ease;
 }
 
+.admin-bill-audit-field input[type="date"] {
+  min-height: 46px;
+  line-height: 1.2;
+  text-align: left;
+  color: var(--gray-900);
+}
+
 .admin-bill-audit-field input:focus,
 .admin-bill-audit-field textarea:focus {
   outline: none;
@@ -239,17 +285,40 @@
 }
 
 .admin-bill-audit-bill strong,
+.admin-bill-audit-paid-meta strong,
 .admin-bill-audit-actor strong {
   display: block;
   color: var(--gray-900);
 }
 
 .admin-bill-audit-bill span,
+.admin-bill-audit-paid-meta span,
 .admin-bill-audit-actor span {
   display: block;
   margin-top: 0.2rem;
   color: var(--gray-500);
   font-size: 0.78rem;
+}
+
+.admin-bill-audit-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 5.75rem;
+  padding: 0.4rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.admin-bill-audit-status.paid {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.admin-bill-audit-status.unpaid {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .admin-bill-audit-amount {
@@ -267,14 +336,44 @@
 .admin-bill-audit-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.45rem;
   white-space: nowrap;
 }
 
+.admin-bill-audit-paid-btn,
 .admin-bill-audit-edit,
 .admin-bill-audit-delete {
   padding: 0.55rem 0.8rem;
   font-size: 0.78rem;
+}
+
+.admin-bill-audit-paid-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border: none;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 700;
+  transition: all 0.2s ease;
+}
+
+.admin-bill-audit-paid-btn.mark {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.admin-bill-audit-paid-btn.undo {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.admin-bill-audit-paid-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .admin-bill-audit-edit {
@@ -306,5 +405,24 @@
   .admin-bill-audit-table-head {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .admin-bill-audit-page-actions {
+    justify-content: stretch;
+  }
+
+  .admin-bill-audit-download {
+    width: 100%;
+  }
+
+  .admin-bill-audit-field input,
+  .admin-bill-audit-field textarea {
+    font-size: 16px;
+  }
+
+  .admin-bill-audit-field input[type="date"] {
+    width: 100%;
+    min-width: 0;
+    padding-right: 0.75rem;
   }
 }

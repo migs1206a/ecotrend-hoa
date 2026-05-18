@@ -47,8 +47,22 @@ const EntryLogSchema = new mongoose.Schema({
   },
   guardOnDuty: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Guard',
-    required: true
+    ref: 'Guard'
+  },
+  recordedBy: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  recordedByName: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  recordedByRole: {
+    type: String,
+    trim: true,
+    default: ''
   },
   timestamp: {
     type: Date,
@@ -66,6 +80,7 @@ const EntryLogSchema = new mongoose.Schema({
 EntryLogSchema.index({ plateNumber: 1 });
 EntryLogSchema.index({ timestamp: -1 });
 EntryLogSchema.index({ guardOnDuty: 1 });
+EntryLogSchema.index({ recordedBy: 1, timestamp: -1 });
 EntryLogSchema.index({ vehicleOwnerType: 1 });
 
 module.exports = mongoose.model('EntryLog', EntryLogSchema);

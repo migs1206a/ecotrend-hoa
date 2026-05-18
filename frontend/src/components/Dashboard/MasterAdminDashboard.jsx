@@ -11,6 +11,7 @@ import PaginationControls from '../common/PaginationControls';
 import { buildPaginatedUrl, parsePaginatedResponse } from '../../utils/pagination';
 import CCTVFeedsModule from '../CCTV/CCTVFeedsModule';
 import SubdivisionMap3D from '../SubdivisionMap/SubdivisionMap3D';
+import { SUBDIVISION_MAP_MODULE } from '../../utils/adminPermissions';
 
 const API = apiUrl('/master-admin');
 
@@ -292,7 +293,7 @@ const MasterAdminDashboard = ({ onLogout }) => {
             className={`ma-nav-item ${activeTab === 'subdivision_map' ? 'active' : ''}`}
             onClick={() => setActiveTab('subdivision_map')}
           >
-            <MapIcon size={20} /><span>3D Mapped Subdivision</span>
+            <MapIcon size={20} /><span>{SUBDIVISION_MAP_MODULE.label}</span>
           </button>
         </nav>
 

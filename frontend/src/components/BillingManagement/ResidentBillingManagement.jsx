@@ -88,8 +88,10 @@ const ResidentBillingManagement = ({ token, userId, showAlert }) => {
   }, [year, fetchBilling, fetchSettings]);
 
   const maxAvailableYear = Math.max(
+    year,
     new Date().getFullYear() + 2,
-    ...Object.keys(settings?.yearlyDues || {}).map((value) => Number(value)).filter(Number.isFinite)
+    ...Object.keys(settings?.yearlyDues || {}).map((value) => Number(value)).filter(Number.isFinite),
+    ...Object.keys(settings?.yearlyRenterDues || {}).map((value) => Number(value)).filter(Number.isFinite)
   );
 
   const currentDate = new Date();
@@ -220,7 +222,7 @@ const ResidentBillingManagement = ({ token, userId, showAlert }) => {
         </div>
         <div className="resident-billing-card">
           <Receipt size={18} />
-          <div><p>Monthly Due</p><strong>P{billing.monthlyDue}</strong></div>
+          <div><p>Monthly Due for {year}</p><strong>P{billing.monthlyDue}</strong></div>
         </div>
       </div>
 

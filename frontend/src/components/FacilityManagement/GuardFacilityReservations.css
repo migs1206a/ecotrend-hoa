@@ -5,6 +5,7 @@
 }
 
 .guard-facility-hero,
+.guard-facility-qr-panel,
 .guard-facility-toolbar,
 .guard-facility-card,
 .guard-facility-empty-state {
@@ -51,7 +52,7 @@
 
 .guard-facility-stats {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.85rem;
 }
 
@@ -75,12 +76,76 @@
   font-weight: 600;
 }
 
+.guard-facility-qr-panel {
+  padding: 1.1rem 1.2rem;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.guard-facility-qr-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.guard-facility-qr-head h3 {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--gray-900);
+}
+
+.guard-facility-qr-head p {
+  margin: 0.3rem 0 0;
+  color: var(--gray-600);
+  line-height: 1.6;
+}
+
+.guard-facility-qr-controls {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.75rem;
+}
+
+.guard-facility-qr-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-lg);
+  padding: 0.85rem 1rem;
+  background: var(--white);
+  color: var(--gray-700);
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.guard-facility-qr-btn.primary {
+  background: linear-gradient(135deg, var(--primary-green) 0%, var(--accent-teal) 100%);
+  border-color: var(--primary-green);
+  color: var(--white);
+  box-shadow: var(--shadow-green);
+}
+
+.guard-facility-qr-video {
+  width: min(100%, 480px);
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--gray-100);
+  background: #020617;
+}
+
 .guard-facility-toolbar {
   padding: 1rem 1.15rem;
   display: flex;
   justify-content: space-between;
   gap: 0.85rem;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .guard-facility-search {
@@ -316,6 +381,91 @@
   font-size: 0.875rem;
 }
 
+.guard-facility-guest-qr-card {
+  padding: 0.95rem 1rem;
+  border-radius: var(--radius-lg);
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+}
+
+.guard-facility-guest-qr-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: flex-start;
+}
+
+.guard-facility-guest-qr-head strong {
+  display: block;
+  color: #1d4ed8;
+  font-size: 0.9rem;
+}
+
+.guard-facility-guest-qr-head p {
+  margin: 0.3rem 0 0;
+  color: #475569;
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.guard-facility-inline-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: none;
+  border-radius: 12px;
+  padding: 0.7rem 0.85rem;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.guard-facility-guest-code {
+  margin-top: 0.85rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.85);
+  border: 1px dashed #93c5fd;
+}
+
+.guard-facility-guest-code span {
+  display: block;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.guard-facility-guest-code strong {
+  display: block;
+  margin-top: 0.45rem;
+  white-space: pre-line;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.18rem;
+  color: #0f172a;
+}
+
+.guard-facility-forgot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 0.85rem;
+}
+
+.guard-facility-forgot-actions button {
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 0.7rem 0.9rem;
+  background: #fff;
+  color: #475569;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+
 .guard-facility-approved {
   display: flex;
   align-items: center;
@@ -342,6 +492,16 @@
   .guard-facility-toolbar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .guard-facility-qr-head,
+  .guard-facility-guest-qr-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .guard-facility-qr-controls {
+    grid-template-columns: 1fr;
   }
 
   .guard-facility-stats,

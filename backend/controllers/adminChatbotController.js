@@ -175,18 +175,19 @@ const buildChatContext = async (message) => {
     recentReservations,
     recentComplaints
   ] = await Promise.all([
-    User.countDocuments({ isApproved: true }),
-    User.countDocuments({ isApproved: false }),
+    User.countDocuments({ isApproved: true, deletedAt: null }),
+    User.countDocuments({ isApproved: false, deletedAt: null }),
     Complaint.countDocuments({ isArchived: { $ne: true }, status: { $in: ['pending', 'in_progress'] } }),
     Visitor.countDocuments({ status: 'inside' }),
     Delivery.countDocuments({ status: 'inside' }),
     FacilityReservation.countDocuments({ status: 'pending' }),
-    User.find({ isApproved: true }).select('vehicles').lean(),
-    User.countDocuments({ isApproved: true, occupancyType: 'renter' }),
-    User.countDocuments({ isApproved: true, occupancyType: 'renter', expiresAt: { $lt: now } }),
+    User.find({ isApproved: true, deletedAt: null }).select('vehicles').lean(),
+    User.countDocuments({ isApproved: true, deletedAt: null, occupancyType: 'renter' }),
+    User.countDocuments({ isApproved: true, deletedAt: null, occupancyType: 'renter', expiresAt: { $lt: now } }),
     EntryLog.countDocuments({ timestamp: { $gte: todayStart } }),
     queryRegex
       ? User.find({
+          deletedAt: null,
           $or: [
             { familyName: queryRegex },
             { username: queryRegex },

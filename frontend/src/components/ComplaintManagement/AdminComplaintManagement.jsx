@@ -6,8 +6,10 @@ import {
   Download,
   Eye,
   FileWarning,
+  LayoutGrid,
   MessageSquareWarning,
   Search,
+  Table2,
   UserRound,
   XCircle
 } from 'lucide-react';
@@ -15,6 +17,26 @@ import './AdminComplaintManagement.css';
 import { downloadComplaintLetterPdf } from '../../utils/complaintLetterPdf';
 import PaginationControls from '../common/PaginationControls';
 import { buildPaginatedUrl, parsePaginatedResponse } from '../../utils/pagination';
+
+const COMPLAINT_CATEGORY_OPTIONS = [
+  { value: 'general', label: 'General Concern' },
+  { value: 'noise_disturbance', label: 'Noise / Disturbance' },
+  { value: 'safety_security', label: 'Safety / Security' },
+  { value: 'property_damage', label: 'Property Damage' },
+  { value: 'parking', label: 'Parking' },
+  { value: 'sanitation', label: 'Sanitation / Cleanliness' },
+  { value: 'pets_animals', label: 'Pets / Animals' },
+  { value: 'harassment', label: 'Harassment / Misconduct' },
+  { value: 'other', label: 'Other' }
+];
+const COMPLAINT_URGENCY_OPTIONS = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'urgent', label: 'Urgent' }
+];
+const CATEGORY_LABELS = Object.fromEntries(COMPLAINT_CATEGORY_OPTIONS.map((option) => [option.value, option.label]));
+const URGENCY_LABELS = Object.fromEntries(COMPLAINT_URGENCY_OPTIONS.map((option) => [option.value, option.label]));
 
 const AdminComplaintManagement = ({ token }) => {
   const [complaints, setComplaints] = useState([]);
@@ -31,6 +53,7 @@ const AdminComplaintManagement = ({ token }) => {
   const [saving, setSaving] = useState(false);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(null);
+  const [viewMode, setViewMode] = useState('card');
 
   const fetchComplaints = useCallback(async () => {
     setLoading(true);
@@ -85,7 +108,9 @@ const AdminComplaintManagement = ({ token }) => {
           complaint.complainantAddress?.toLowerCase().includes(query) ||
           complaint.againstPersonName?.toLowerCase().includes(query) ||
           complaint.subject?.toLowerCase().includes(query) ||
-          complaint.location?.toLowerCase().includes(query);
+          complaint.location?.toLowerCase().includes(query) ||
+          complaint.category?.toLowerCase().includes(query) ||
+          complaint.urgency?.toLowerCase().includes(query);
 
         const matchesStatus = statusFilter === 'all' || complaint.status === statusFilter;
         const matchesType = typeFilter === 'all' || complaint.complaintType === typeFilter;
@@ -106,6 +131,9 @@ const AdminComplaintManagement = ({ token }) => {
     };
     return map[status] || map.pending;
   };
+
+  const getCategoryLabel = (category) => CATEGORY_LABELS[category] || CATEGORY_LABELS.general;
+  const getUrgencyLabel = (urgency) => URGENCY_LABELS[urgency] || URGENCY_LABELS.medium;
 
   const startEdit = (complaint) => {
     setEditingId(complaint._id);
@@ -224,6 +252,16 @@ const AdminComplaintManagement = ({ token }) => {
             <option value="in_progress">In Progress</option>
             <option value="resolved">Resolved</option>
           </select>
+          <div className="module-view-toggle">
+            <button type="button" className={`module-view-toggle__btn ${viewMode === 'card' ? 'active' : ''}`} onClick={() => setViewMode('card')}>
+              <LayoutGrid size={16} />
+              <span>Cards</span>
+            </button>
+            <button type="button" className={`module-view-toggle__btn ${viewMode === 'table' ? 'active' : ''}`} onClick={() => setViewMode('table')}>
+              <Table2 size={16} />
+              <span>Table</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -237,6 +275,98 @@ const AdminComplaintManagement = ({ token }) => {
           <AlertCircle size={40} style={{ color: '#9ca3af' }} />
           <h3>No Complaints Found</h3>
           <p>Try adjusting your filters or wait for resident complaints to come in.</p>
+        </div>
+      ) : viewMode === 'table' ? (
+        <div className="module-table-card">
+          <div className="module-table-wrap">
+            <table className="module-table">
+              <thead>
+                <tr>
+                  <th>Complainant</th>
+                  <th>Type / Details</th>
+                  <th>Submitted</th>
+                  <th>Status</th>
+                  <th>Responses</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredComplaints.map((complaint) => {
+                  const statusMeta = getStatusMeta(complaint.status);
+                  return (
+                    <tr key={complaint._id}>
+                      <td>
+                        <span className="module-table__primary">{complaint.complainantName}</span>
+                        <span className="module-table__secondary">{complaint.complainantAddress}</span>
+                      </td>
+                      <td>
+                        <span className="module-table__primary">
+                          {complaint.complaintType === 'person' ? 'Against a Person' : complaint.subject}
+                        </span>
+                        <span className="module-table__secondary">
+                          Category: {getCategoryLabel(complaint.category)} | Urgency: {getUrgencyLabel(complaint.urgency)}
+                        </span>
+                        <span className="module-table__notes">
+                          {complaint.complaintType === 'person'
+                            ? `Reported person: ${complaint.againstPersonName}`
+                            : `Location: ${complaint.location}`}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="module-table__primary">{new Date(complaint.createdAt).toLocaleString()}</span>
+                      </td>
+                      <td>
+                        <span className={`module-table__pill ${complaint.status === 'pending' ? 'pending' : complaint.status === 'resolved' ? 'success' : 'info'}`}>
+                          {statusMeta.label}
+                        </span>
+                        {complaint.isArchived && <span className="module-table__secondary">Archived</span>}
+                      </td>
+                      <td>
+                        {complaint.adminResponse || complaint.internalRemarks ? (
+                          <span className="module-table__notes">
+                            {complaint.adminResponse ? `Resident: ${complaint.adminResponse}` : ''}
+                            {complaint.adminResponse && complaint.internalRemarks ? ' ' : ''}
+                            {complaint.internalRemarks ? `Internal: ${complaint.internalRemarks}` : ''}
+                          </span>
+                        ) : (
+                          <span className="module-table__empty">No response or remarks yet</span>
+                        )}
+                      </td>
+                      <td>
+                        <div className="module-table__actions">
+                          {complaint.photo?.path && (
+                            <button type="button" className="module-table__action-btn secondary" onClick={() => setViewingPhoto(complaint.photo)}>
+                              <Eye size={14} /> View Photo
+                            </button>
+                          )}
+                          {complaint.complaintType === 'person' && (
+                            <button type="button" className="module-table__action-btn info" onClick={() => downloadComplaintLetterPdf(complaint)}>
+                              <Download size={14} /> Letter
+                            </button>
+                          )}
+                          {complaint.status === 'resolved' && !complaint.isArchived && (
+                            <button type="button" className="module-table__action-btn warning" onClick={() => archiveComplaint(complaint._id)}>
+                              Archive
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="module-table__action-btn primary"
+                            onClick={() => {
+                              setViewMode('card');
+                              startEdit(complaint);
+                            }}
+                          >
+                            Review
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : (
         <div className="admin-complaint-grid">
@@ -259,6 +389,13 @@ const AdminComplaintManagement = ({ token }) => {
                 </div>
 
                 <div className="admin-complaint-card-body">
+                  <div className="admin-complaint-meta-tags">
+                    <span className="admin-complaint-meta-tag">{getCategoryLabel(complaint.category)}</span>
+                    <span className={`admin-complaint-meta-tag urgency ${complaint.urgency || 'medium'}`}>
+                      {getUrgencyLabel(complaint.urgency)}
+                    </span>
+                  </div>
+
                   {complaint.complaintType === 'person' ? (
                     <>
                       <div className="admin-complaint-info-box">

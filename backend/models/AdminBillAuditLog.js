@@ -28,6 +28,18 @@ const adminBillAuditLogSchema = new mongoose.Schema({
     trim: true,
     default: ''
   },
+  isPaid: {
+    type: Boolean,
+    default: false
+  },
+  paidAt: {
+    type: Date,
+    default: null
+  },
+  paidBy: {
+    type: actorSnapshotSchema,
+    default: () => ({})
+  },
   createdBy: {
     type: actorSnapshotSchema,
     default: () => ({})

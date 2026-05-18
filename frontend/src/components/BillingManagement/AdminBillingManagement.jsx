@@ -63,7 +63,7 @@ const emptyMonths = () =>
 
 const formatMonthLabel = (month) => month.charAt(0) + month.slice(1).toLowerCase();
 const formatCurrency = (amount) =>
-  `P${Number(amount || 0).toLocaleString(undefined, {
+  `₱${Number(amount || 0).toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   })}`;
@@ -92,6 +92,15 @@ const getConfiguredDue = (settings, targetYear, occupancyType) => {
 
   return Number(dueSource[String(targetYear)]) || DEFAULT_MONTHLY_DUE;
 };
+
+const getConfiguredYearNumbers = (settings) => (
+  [
+    ...Object.keys(settings?.yearlyDues || {}),
+    ...Object.keys(settings?.yearlyRenterDues || {})
+  ]
+    .map((value) => Number(value))
+    .filter(Number.isFinite)
+);
 
 const sortResidents = (first, second) => {
   const surnameComparison = String(first.familyName || '').localeCompare(
@@ -156,6 +165,7 @@ const AdminBillingManagement = ({ token, showConfirm }) => {
   const [uploadingQr, setUploadingQr] = useState(false);
   const [viewingReceipt, setViewingReceipt] = useState(null);
   const [viewingQr, setViewingQr] = useState(false);
+  const [yearInput, setYearInput] = useState(String(new Date().getFullYear()));
 
   const configuredPermanentDue = getConfiguredDue(settings, year, 'permanent');
   const configuredRenterDue = getConfiguredDue(settings, year, 'renter');
@@ -165,10 +175,15 @@ const AdminBillingManagement = ({ token, showConfirm }) => {
   }), [configuredPermanentDue, configuredRenterDue]);
 
   const currentYear = new Date().getFullYear();
+  const maxJumpYear = currentYear + 25;
+  const configuredYearNumbers = useMemo(
+    () => getConfiguredYearNumbers(settings),
+    [settings]
+  );
   const maxConfiguredYear = Math.max(
+    year,
     currentYear + 2,
-    ...Object.keys(settings?.yearlyDues || {}).map((value) => Number(value)).filter(Number.isFinite),
-    ...Object.keys(settings?.yearlyRenterDues || {}).map((value) => Number(value)).filter(Number.isFinite)
+    ...configuredYearNumbers
   );
   const years = Array.from(
     { length: Math.max(maxConfiguredYear - BASE_YEAR + 1, 1) },
@@ -244,6 +259,10 @@ const AdminBillingManagement = ({ token, showConfirm }) => {
       renter: String(configuredRenterDue)
     });
   }, [configuredPermanentDue, configuredRenterDue, year]);
+
+  useEffect(() => {
+    setYearInput(String(year));
+  }, [year]);
 
   const fetchBillingDetail = useCallback(async (residentId, targetYear) => {
     setDetailLoad(true);
@@ -640,6 +659,28 @@ const AdminBillingManagement = ({ token, showConfirm }) => {
   const totalAmount = totalPaid * monthlyDue;
   const totalDue = 12 * monthlyDue;
   const totalUnpaid = totalDue - totalAmount;
+  const dueSchedule = useMemo(
+    () =>
+      [...new Set([currentYear, year, ...configuredYearNumbers])]
+        .filter((itemYear) => itemYear >= BASE_YEAR)
+        .sort((first, second) => first - second)
+        .map((itemYear) => ({
+          year: itemYear,
+          permanent: getConfiguredDue(settings, itemYear, 'permanent'),
+          renter: getConfiguredDue(settings, itemYear, 'renter')
+        })),
+    [configuredYearNumbers, currentYear, settings, year]
+  );
+
+  const jumpToYear = () => {
+    const parsedYear = Number(yearInput);
+
+    if (!Number.isInteger(parsedYear) || parsedYear < BASE_YEAR || parsedYear > maxJumpYear) {
+      return;
+    }
+
+    setYear(parsedYear);
+  };
 
   const renderDirectoryTable = () => {
     if (loadingDirectory) {
@@ -746,7 +787,30 @@ const AdminBillingManagement = ({ token, showConfirm }) => {
             <div className="billing-settings-header">
               <div>
                 <h3><Receipt size={18} /> Monthly Dues by Resident Type</h3>
-                <p>Set the billing amount per month for each resident type for the selected year.</p>
+                <p>Set the locked monthly billing amount for the selected year. Each year keeps its own permanent and renter rate.</p>
+              </div>
+              <div className="billing-settings-year-jump">
+                <input
+                  type="number"
+                  min={BASE_YEAR}
+                  max={maxJumpYear}
+                  step="1"
+                  className="billing-year-jump-input"
+                  value={yearInput}
+                  onChange={(event) => setYearInput(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="billing-year-jump-btn"
+                  onClick={jumpToYear}
+                  disabled={
+                    !Number.isInteger(Number(yearInput)) ||
+                    Number(yearInput) < BASE_YEAR ||
+                    Number(yearInput) > maxJumpYear
+                  }
+                >
+                  Go To Year
+                </button>
               </div>
             </div>
             <div className="billing-dues-grid">
@@ -754,7 +818,7 @@ const AdminBillingManagement = ({ token, showConfirm }) => {
                 <div className="billing-due-panel-head">
                   <div>
                     <h4>Permanent Residents</h4>
-                    <p>{year} default monthly due</p>
+                    <p>{year} monthly due schedule</p>
                   </div>
                   <span className="billing-dues-year">{year}</span>
                 </div>
@@ -789,7 +853,7 @@ const AdminBillingManagement = ({ token, showConfirm }) => {
                 <div className="billing-due-panel-head">
                   <div>
                     <h4>Renters</h4>
-                    <p>{year} renter monthly due</p>
+                    <p>{year} monthly due schedule</p>
                   </div>
                   <span className="billing-dues-year accent">Renter</span>
                 </div>
@@ -818,6 +882,44 @@ const AdminBillingManagement = ({ token, showConfirm }) => {
                     {savingDueKey === 'renter' ? 'Saving...' : 'Save Amount'}
                   </button>
                 </div>
+              </div>
+            </div>
+            <div className="billing-dues-schedule">
+              <div className="billing-dues-schedule-head">
+                <div>
+                  <h4>Yearly Dues Schedule</h4>
+                  <p>Switch years anytime without affecting the amounts already saved for other years.</p>
+                </div>
+              </div>
+              <div className="billing-dues-schedule-table-wrap">
+                <table className="billing-dues-schedule-table">
+                  <thead>
+                    <tr>
+                      <th>Year</th>
+                      <th>Permanent</th>
+                      <th>Renter</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dueSchedule.map((item) => (
+                      <tr key={item.year}>
+                        <td>{item.year}</td>
+                        <td>{formatCurrency(item.permanent)}</td>
+                        <td>{formatCurrency(item.renter)}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="billing-dues-open-year-btn"
+                            onClick={() => setYear(item.year)}
+                          >
+                            Open
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>

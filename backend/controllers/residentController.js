@@ -13,10 +13,13 @@ const {
 const {
   RENEWAL_STATUSES,
   appendResidentComputedFields,
+  buildHouseholdDetails,
   endOfDay,
   isValidDate,
   normalizeOccupancyType
 } = require('../utils/residentAccounts');
+const { buildSoftDeleteFields, isSoftDeleted } = require('../utils/accountLifecycle');
+const { validateResidentEmail } = require('../utils/emailVerification');
 
 const BACKEND_ROOT = path.join(__dirname, '..');
 const UPLOADS_ROOT = path.join(BACKEND_ROOT, 'uploads');
@@ -33,6 +36,103 @@ const normalizePlateNumber = (value) => {
     return { error: 'Plate number can only contain letters and numbers' };
   }
   return { value: normalized };
+};
+
+const escapeRegex = (value) =>
+  String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const buildResidentSearchFilter = (value = '') => {
+  const query = String(value || '').trim();
+
+  if (!query) {
+    return {};
+  }
+
+  const normalized = query.toLowerCase();
+  const matchesKeyword = (keyword) =>
+    normalized === keyword || (normalized.length >= 3 && keyword.startsWith(normalized));
+  const regex = new RegExp(escapeRegex(query), 'i');
+  const orFilters = [
+    { familyName: regex },
+    { username: regex },
+    { email: regex },
+    { houseAddress: regex },
+    { street: regex },
+    { phoneNumber: regex },
+    { block: regex },
+    { lot: regex },
+    { phase: regex },
+    { buildingName: regex },
+    { unitNumber: regex }
+  ];
+
+  if (matchesKeyword('renter')) {
+    orFilters.push({ occupancyType: 'renter' });
+  }
+
+  if (matchesKeyword('permanent')) {
+    orFilters.push({ occupancyType: 'permanent' });
+  }
+
+  if (matchesKeyword('house')) {
+    orFilters.push({ propertyType: 'house' });
+  }
+
+  if (matchesKeyword('apartment')) {
+    orFilters.push({ propertyType: 'apartment' });
+  }
+
+  return { $or: orFilters };
+};
+
+const RESIDENT_SORTS = Object.freeze({
+  newest: { createdAt: -1, familyName: 1, username: 1 },
+  oldest: { createdAt: 1, familyName: 1, username: 1 },
+  family_asc: { familyName: 1, username: 1, createdAt: -1 },
+  family_desc: { familyName: -1, username: -1, createdAt: -1 }
+});
+
+const getResidentSortKey = (value = '') => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(RESIDENT_SORTS, normalized)
+    ? normalized
+    : 'newest';
+};
+
+const buildResidentQuery = (baseFilter, req) => {
+  const pagination = parsePagination(req.query);
+  const filter = {
+    ...baseFilter,
+    ...buildResidentSearchFilter(req.query.q)
+  };
+  const sortKey = getResidentSortKey(req.query.sort);
+  const usesAlphabeticalSort = sortKey.startsWith('family_');
+
+  return {
+    filter,
+    pagination,
+    sortKey,
+    usesAlphabeticalSort
+  };
+};
+
+const applyResidentSort = (query, sortKey, usesAlphabeticalSort) => {
+  query.sort(RESIDENT_SORTS[sortKey] || RESIDENT_SORTS.newest);
+
+  if (usesAlphabeticalSort) {
+    query.collation({ locale: 'en', strength: 1 });
+  }
+
+  return query;
+};
+
+const toResidentDateInput = (value) => {
+  if (!value) {
+    return '';
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString().split('T')[0];
 };
 
 const pipeRemoteFile = (fileUrl, res, redirectCount = 0) =>
@@ -69,14 +169,26 @@ const pipeRemoteFile = (fileUrl, res, redirectCount = 0) =>
 
 exports.getApprovedResidents = async (req, res) => {
   try {
-    const pagination = parsePagination(req.query);
-    const approvedUsers = await User.find({ isApproved: true })
-      .select('-password')
-      .sort({ createdAt: -1 });
+    const {
+      filter,
+      pagination,
+      sortKey,
+      usesAlphabeticalSort
+    } = buildResidentQuery({ isApproved: true, deletedAt: null }, req);
+    const total = await User.countDocuments(filter);
+    const query = applyResidentSort(
+      User.find(filter).select('-password').lean(),
+      sortKey,
+      usesAlphabeticalSort
+    );
 
+    if (pagination.enabled) {
+      query.skip(pagination.skip).limit(pagination.limit);
+    }
+
+    const approvedUsers = await query;
     const serializedResidents = approvedUsers.map((resident) => appendResidentComputedFields(resident));
-    const paginated = paginateArray(serializedResidents, pagination);
-    sendPaginatedResponse(res, pagination, paginated.items, paginated.total);
+    sendPaginatedResponse(res, pagination, serializedResidents, total);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
@@ -84,14 +196,26 @@ exports.getApprovedResidents = async (req, res) => {
 
 exports.getPendingResidents = async (req, res) => {
   try {
-    const pagination = parsePagination(req.query);
-    const pendingUsers = await User.find({ isApproved: false })
-      .select('-password')
-      .sort({ createdAt: -1 });
+    const {
+      filter,
+      pagination,
+      sortKey,
+      usesAlphabeticalSort
+    } = buildResidentQuery({ isApproved: false, deletedAt: null }, req);
+    const total = await User.countDocuments(filter);
+    const query = applyResidentSort(
+      User.find(filter).select('-password').lean(),
+      sortKey,
+      usesAlphabeticalSort
+    );
 
+    if (pagination.enabled) {
+      query.skip(pagination.skip).limit(pagination.limit);
+    }
+
+    const pendingUsers = await query;
     const serializedResidents = pendingUsers.map((resident) => appendResidentComputedFields(resident));
-    const paginated = paginateArray(serializedResidents, pagination);
-    sendPaginatedResponse(res, pagination, paginated.items, paginated.total);
+    sendPaginatedResponse(res, pagination, serializedResidents, total);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
@@ -101,7 +225,7 @@ exports.getResidentById = async (req, res) => {
   try {
     const resident = await User.findById(req.params.id).select('-password');
 
-    if (!resident) {
+    if (!resident || isSoftDeleted(resident)) {
       return res.status(404).json({ message: 'Resident not found' });
     }
 
@@ -119,7 +243,7 @@ exports.approveResident = async (req, res) => {
       { new: true }
     ).select('-password');
 
-    if (!resident) {
+    if (!resident || isSoftDeleted(resident)) {
       return res.status(404).json({ message: 'Resident not found' });
     }
 
@@ -134,15 +258,19 @@ exports.approveResident = async (req, res) => {
 
 exports.deleteResident = async (req, res) => {
   try {
-    const resident = await User.findByIdAndDelete(req.params.id);
+    const resident = await User.findById(req.params.id);
 
-    if (!resident) {
+    if (!resident || isSoftDeleted(resident)) {
       return res.status(404).json({ message: 'Resident not found' });
     }
 
+    Object.assign(resident, buildSoftDeleteFields(req.user));
+    await resident.save();
+
     res.json({
-      message: 'Resident deleted successfully',
-      deletedId: req.params.id
+      message: 'Resident moved to recently deleted accounts.',
+      deletedId: req.params.id,
+      purgeAfter: resident.purgeAfter
     });
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -154,17 +282,21 @@ exports.updateResident = async (req, res) => {
     const {
       email,
       familyName,
-      houseAddress,
       street,
+      block,
+      lot,
+      phase,
+      buildingName,
+      unitNumber,
       phoneNumber,
       familyMembers
     } = req.body;
 
-    const updateData = {
-      email,
-      houseAddress,
-      street
-    };
+    const resident = await User.findById(req.params.id).select('-password');
+
+    if (!resident || isSoftDeleted(resident)) {
+      return res.status(404).json({ message: 'Resident not found' });
+    }
 
     if (familyName !== undefined) {
       const familyNameValidation = validateNameField(familyName, 'Family name', {
@@ -174,7 +306,7 @@ exports.updateResident = async (req, res) => {
       if (familyNameValidation.error) {
         return res.status(400).json({ message: familyNameValidation.error });
       }
-      updateData.familyName = familyNameValidation.value;
+      resident.familyName = familyNameValidation.value;
     }
 
     if (phoneNumber !== undefined) {
@@ -184,7 +316,7 @@ exports.updateResident = async (req, res) => {
       if (phoneNumberValidation.error) {
         return res.status(400).json({ message: phoneNumberValidation.error });
       }
-      updateData.phoneNumber = phoneNumberValidation.value;
+      resident.phoneNumber = phoneNumberValidation.value;
     }
 
     if (familyMembers !== undefined) {
@@ -195,18 +327,66 @@ exports.updateResident = async (req, res) => {
       if (familyMembersValidation.error) {
         return res.status(400).json({ message: familyMembersValidation.error });
       }
-      updateData.familyMembers = familyMembersValidation.value;
+      resident.familyMembers = familyMembersValidation.value;
     }
 
-    const resident = await User.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    ).select('-password');
+    if (email !== undefined) {
+      const emailValidation = validateResidentEmail(email);
+      if (emailValidation.error) {
+        return res.status(400).json({ message: emailValidation.error });
+      }
 
-    if (!resident) {
-      return res.status(404).json({ message: 'Resident not found' });
+      const emailConflict = await User.findOne({
+        email: emailValidation.value,
+        _id: { $ne: resident._id }
+      }).select('_id');
+
+      if (emailConflict) {
+        return res.status(400).json({ message: 'Email address is already in use.' });
+      }
+
+      resident.email = emailValidation.value;
     }
+
+    const shouldRebuildAddress = [
+      street,
+      block,
+      lot,
+      phase,
+      buildingName,
+      unitNumber
+    ].some((value) => value !== undefined);
+
+    if (shouldRebuildAddress) {
+      const householdDetailsResult = buildHouseholdDetails({
+        propertyType: resident.propertyType,
+        occupancyType: resident.occupancyType,
+        street: street !== undefined ? street : resident.street,
+        block: block !== undefined ? block : resident.block,
+        lot: lot !== undefined ? lot : resident.lot,
+        phase: phase !== undefined ? phase : resident.phase,
+        buildingName: buildingName !== undefined ? buildingName : resident.buildingName,
+        unitNumber: unitNumber !== undefined ? unitNumber : resident.unitNumber,
+        occupancyStartDate: toResidentDateInput(resident.occupancyStartDate),
+        occupancyEndDate: toResidentDateInput(resident.occupancyEndDate)
+      });
+
+      if (householdDetailsResult.error) {
+        return res.status(400).json({ message: householdDetailsResult.error });
+      }
+
+      const householdDetails = householdDetailsResult.value;
+      resident.street = householdDetails.street;
+      resident.block = householdDetails.block;
+      resident.lot = householdDetails.lot;
+      resident.phase = householdDetails.phase;
+      resident.buildingName = householdDetails.buildingName;
+      resident.unitNumber = householdDetails.unitNumber;
+      resident.houseAddress = householdDetails.houseAddress;
+      resident.addressKey = householdDetails.addressKey;
+    }
+
+    await resident.save();
 
     res.json({
       message: 'Resident updated successfully',
@@ -221,7 +401,7 @@ exports.requestRenewal = async (req, res) => {
   try {
     const resident = await User.findById(req.params.id).select('-password');
 
-    if (!resident) {
+    if (!resident || isSoftDeleted(resident)) {
       return res.status(404).json({ message: 'Resident not found' });
     }
 
@@ -273,7 +453,7 @@ exports.approveRenewal = async (req, res) => {
   try {
     const resident = await User.findById(req.params.id).select('-password');
 
-    if (!resident) {
+    if (!resident || isSoftDeleted(resident)) {
       return res.status(404).json({ message: 'Resident not found' });
     }
 
@@ -328,7 +508,7 @@ exports.rejectRenewal = async (req, res) => {
   try {
     const resident = await User.findById(req.params.id).select('-password');
 
-    if (!resident) {
+    if (!resident || isSoftDeleted(resident)) {
       return res.status(404).json({ message: 'Resident not found' });
     }
 
@@ -355,9 +535,9 @@ exports.rejectRenewal = async (req, res) => {
 
 exports.getResidentStats = async (req, res) => {
   try {
-    const totalResidents = await User.countDocuments({ isApproved: true });
-    const pendingApprovals = await User.countDocuments({ isApproved: false });
-    const totalUsers = await User.countDocuments();
+    const totalResidents = await User.countDocuments({ isApproved: true, deletedAt: null });
+    const pendingApprovals = await User.countDocuments({ isApproved: false, deletedAt: null });
+    const totalUsers = await User.countDocuments({ deletedAt: null });
 
     res.json({
       totalResidents,
@@ -373,7 +553,7 @@ exports.getResidentIdentification = async (req, res) => {
   try {
     const resident = await User.findById(req.params.id);
 
-    if (!resident) {
+    if (!resident || isSoftDeleted(resident)) {
       return res.status(404).json({ message: 'Resident not found' });
     }
 
@@ -396,7 +576,7 @@ exports.viewResidentIdentification = async (req, res) => {
   try {
     const resident = await User.findById(req.params.id);
 
-    if (!resident) {
+    if (!resident || isSoftDeleted(resident)) {
       return res.status(404).json({ message: 'Resident not found' });
     }
 
@@ -444,7 +624,7 @@ exports.getResidentVehicles = async (req, res) => {
     const pagination = parsePagination(req.query);
     const resident = await User.findById(req.params.id).select('vehicles');
 
-    if (!resident) {
+    if (!resident || isSoftDeleted(resident)) {
       return res.status(404).json({ message: 'Resident not found' });
     }
 
@@ -459,7 +639,7 @@ exports.getResidentVehicles = async (req, res) => {
 exports.getAllVehicles = async (req, res) => {
   try {
     const pagination = parsePagination(req.query);
-    const approvedResidents = await User.find({ isApproved: true })
+    const approvedResidents = await User.find({ isApproved: true, deletedAt: null })
       .select('familyName houseAddress street phoneNumber vehicles')
       .sort({ createdAt: -1 })
       .lean();
@@ -500,7 +680,7 @@ exports.addVehicle = async (req, res) => {
     }
 
     const resident = await User.findById(req.params.id);
-    if (!resident) {
+    if (!resident || isSoftDeleted(resident)) {
       return res.status(404).json({ message: 'Resident not found' });
     }
 
@@ -546,7 +726,7 @@ exports.updateVehicle = async (req, res) => {
     const { plateNumber, vehicleType, brand, model, color } = req.body;
     const resident = await User.findById(req.params.id);
 
-    if (!resident) {
+    if (!resident || isSoftDeleted(resident)) {
       return res.status(404).json({ message: 'Resident not found' });
     }
 
@@ -606,7 +786,7 @@ exports.deleteVehicle = async (req, res) => {
   try {
     const resident = await User.findById(req.params.id);
 
-    if (!resident) {
+    if (!resident || isSoftDeleted(resident)) {
       return res.status(404).json({ message: 'Resident not found' });
     }
 
@@ -632,7 +812,7 @@ exports.getDeletedVehicles = async (req, res) => {
     const pagination = parsePagination(req.query);
     const resident = await User.findById(req.params.id).select('vehicles');
 
-    if (!resident) {
+    if (!resident || isSoftDeleted(resident)) {
       return res.status(404).json({ message: 'Resident not found' });
     }
 
@@ -652,7 +832,7 @@ exports.restoreVehicle = async (req, res) => {
   try {
     const resident = await User.findById(req.params.id);
 
-    if (!resident) {
+    if (!resident || isSoftDeleted(resident)) {
       return res.status(404).json({ message: 'Resident not found' });
     }
 
@@ -682,7 +862,7 @@ exports.permanentDeleteVehicle = async (req, res) => {
   try {
     const resident = await User.findById(req.params.id);
 
-    if (!resident) {
+    if (!resident || isSoftDeleted(resident)) {
       return res.status(404).json({ message: 'Resident not found' });
     }
 
@@ -711,7 +891,7 @@ exports.getVehiclePhoto = async (req, res) => {
   try {
     const resident = await User.findById(req.params.id);
 
-    if (!resident) {
+    if (!resident || isSoftDeleted(resident)) {
       return res.status(404).json({ message: 'Resident not found' });
     }
 

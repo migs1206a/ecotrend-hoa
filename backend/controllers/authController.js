@@ -27,6 +27,7 @@ const {
 const {
   IMAGE_UPLOAD_MAX_BYTES
 } = require('../utils/uploadLimits');
+const { isSoftDeleted } = require('../utils/accountLifecycle');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1h';
@@ -148,6 +149,12 @@ exports.register = async (req, res) => {
       ]
     });
     if (existingUser) {
+      if (isSoftDeleted(existingUser)) {
+        return res.status(409).json({
+          message: 'A recently deleted resident account already uses this registration information. Please contact the HOA admin to restore it or wait for the retention window to end.'
+        });
+      }
+
       if (existingUser.email === normalizedEmail) {
         return res.status(400).json({ message: 'Email already exists' });
       }
@@ -284,19 +291,19 @@ exports.login = async (req, res) => {
     let position = OFFICER_POSITIONS.PRESIDENT;
 
     if (!user) {
-      user = await Admin.findOne({ username });
+      user = await Admin.findOne({ username, deletedAt: null });
       role = 'ADMIN';
       position = normalizeOfficerPosition(user?.position);
     }
 
     if (!user) {
-      user = await Guard.findOne({ username });
+      user = await Guard.findOne({ username, deletedAt: null });
       role = 'GUARD';
       position = '';
     }
 
     if (!user) {
-      user = await User.findOne({ username });
+      user = await User.findOne({ username, deletedAt: null });
       role = 'RESIDENT';
       position = '';
 

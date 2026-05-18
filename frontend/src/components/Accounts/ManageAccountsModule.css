@@ -48,6 +48,41 @@
   font-size: 1.35rem;
 }
 
+.manage-accounts-module .ma-scope-switch {
+  display: inline-flex;
+  gap: 0.5rem;
+  padding: 0.35rem;
+  border-radius: 16px;
+  background: var(--gray-100);
+  margin-bottom: 1rem;
+}
+
+.manage-accounts-module .ma-scope-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.7rem 1rem;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--gray-600);
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.manage-accounts-module .ma-scope-btn.active {
+  background: var(--white);
+  color: var(--primary-green-dark);
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
+}
+
+.manage-accounts-module .ma-stat-pill.resident {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
 .manage-accounts-module .ma-page-header {
   display: flex;
   justify-content: space-between;
@@ -140,6 +175,61 @@
 
 .manage-accounts-module .ma-action-btn {
   flex: 0 0 32px;
+}
+
+.manage-accounts-module .ma-sort-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  color: var(--gray-500);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.manage-accounts-module .ma-sort-select {
+  min-width: 180px;
+  padding: 0.65rem 0.85rem;
+  border: 2px solid var(--gray-200);
+  border-radius: 10px;
+  background: var(--white);
+  color: var(--gray-700);
+  font: inherit;
+  cursor: pointer;
+}
+
+.manage-accounts-module .ma-sort-select:focus {
+  outline: none;
+  border-color: var(--primary-green);
+  box-shadow: 0 0 0 3px var(--accent-green);
+}
+
+.manage-accounts-module .avatar-resident {
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  color: #1d4ed8;
+}
+
+.manage-accounts-module .badge-resident {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.manage-accounts-module .restore-btn {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.manage-accounts-module .ma-action-btn--label {
+  width: auto;
+  flex: 0 0 auto;
+  min-width: 96px;
+  padding: 0 0.75rem;
+  gap: 0.45rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.manage-accounts-module .restore-btn:hover {
+  background: #d1fae5;
 }
 
 .manage-accounts-module .ma-modal.ma-modal-lg {
@@ -344,6 +434,12 @@ body > .ma-modal-overlay .ma-modal-body {
     align-items: stretch;
   }
 
+  .manage-accounts-module .ma-scope-switch {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .manage-accounts-module .ma-view-switch {
     width: 100%;
   }
@@ -351,6 +447,16 @@ body > .ma-modal-overlay .ma-modal-body {
   .manage-accounts-module .ma-view-btn,
   .manage-accounts-module .ma-directory-link {
     justify-content: center;
+    width: 100%;
+  }
+
+  .manage-accounts-module .ma-sort-wrap {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .manage-accounts-module .ma-sort-select {
+    min-width: 0;
     width: 100%;
   }
 
