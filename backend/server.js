@@ -33,10 +33,20 @@ const allowedCorsOrigins = new Set([
   'http://127.0.0.1:3000'
 ]);
 
+const isAllowedLocalDevOrigin = (origin = '') =>
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(
+    String(origin).replace(/\/+$/, '')
+  );
+
 // Middleware
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedCorsOrigins.has(String(origin).replace(/\/+$/, ''))) {
+    const normalizedOrigin = String(origin || '').replace(/\/+$/, '');
+    if (
+      !origin ||
+      allowedCorsOrigins.has(normalizedOrigin) ||
+      isAllowedLocalDevOrigin(normalizedOrigin)
+    ) {
       return callback(null, true);
     }
 

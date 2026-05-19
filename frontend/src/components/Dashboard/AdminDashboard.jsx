@@ -33,6 +33,11 @@ import {
   getResidentAccountMeta,
   getResidentOccupancyLabel
 } from '../../utils/residentAccounts';
+import {
+  formatVisitorAccessCode,
+  getVisitorAccessCode,
+  isQrManagedVisitor
+} from '../../utils/visitorQr';
 
 const formatResidentDate = (value, fallback = 'Not set') => {
   if (!value) {
@@ -103,13 +108,7 @@ const formatResidentDraftAddress = (draft = {}, propertyType = 'house') => {
   return parts.join(', ') || 'Complete the address fields to preview the full home address.';
 };
 
-const formatVisitorAccessCode = (value) => String(value || '').trim().match(/.{1,4}/g)?.join('\n') || '';
 const getVisitorPartySize = (visitor) => 1 + (Array.isArray(visitor?.accompanyingVisitors) ? visitor.accompanyingVisitors.length : 0);
-const isQrManagedVisitor = (visitor) => Boolean(
-  visitor?.qrEntryEnabled ||
-  String(visitor?.qrManualCode || visitor?.qrToken || '').trim() ||
-  (Array.isArray(visitor?.qrCheckpoints) && visitor.qrCheckpoints.length > 0)
-);
 
 // ── OUTSIDE AdminDashboard kasi nagbblink due to currentTime re-renders (nakikisabay yarn HAHAHA) ──────
 
@@ -151,7 +150,8 @@ const ResidentDetailModal = ({
   onUpdateResident,
   onDeleteResident,
   isUpdatingResident,
-  isDeletingResident
+  isDeletingResident,
+  startInEditMode = false
 }) => {
   const accountMeta = getResidentAccountMeta(resident);
   const hasPendingRenewal = resident?.renewalStatus === 'pending';
@@ -168,9 +168,9 @@ const ResidentDetailModal = ({
       formatDateInputValue(resident?.expiresAt)
     );
     setDecisionNote('');
-    setIsEditing(false);
+    setIsEditing(Boolean(startInEditMode));
     setEditDraft(buildResidentEditDraft(resident));
-  }, [resident?._id, resident?.requestedOccupancyEndDate, resident?.expiresAt]);
+  }, [resident?._id, resident?.requestedOccupancyEndDate, resident?.expiresAt, startInEditMode]);
 
   const handleDraftChange = (field, value) => {
     setEditDraft((currentDraft) => ({
@@ -714,6 +714,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const [viewingVisitorIdentification, setViewingVisitorIdentification] = useState(null);
   const [residentViewMode, setResidentViewMode] = useState('card');
   const [viewingResident, setViewingResident]   = useState(null);
+  const [residentModalMode, setResidentModalMode] = useState('view');
   const [viewingFamilyMembers, setViewingFamilyMembers] = useState(null);
   const [viewingVehicle, setViewingVehicle] = useState(null);
   const [allVehicles, setAllVehicles]           = useState([]);
@@ -737,6 +738,11 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const [residentMutation, setResidentMutation] = useState({ id: '', action: '' });
   const lastTrackedModuleRef = useRef('');
   const residentLoading = residentLoadingCount > 0;
+
+  const openResidentModal = useCallback((resident, mode = 'view') => {
+    setResidentModalMode(mode);
+    setViewingResident(resident);
+  }, []);
 
   const [sessionUser, setSessionUser] = useState(() => JSON.parse(localStorage.getItem('user') || '{}'));
   const user = sessionUser;
@@ -1338,14 +1344,14 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
     <ScrollableTableWrapper>
       <table className="residents-table">
         <thead>
-          <tr><th>Family Name</th><th>Username</th><th>Resident Type</th><th>Status</th><th>Address</th><th>Family Members</th><th>Joined</th><th>ID</th></tr>
+          <tr><th>Family Name</th><th>Username</th><th>Resident Type</th><th>Status</th><th>Address</th><th>Family Members</th><th>Joined</th><th>ID</th><th>Actions</th></tr>
         </thead>
         <tbody>
           {residents.map((resident) => {
             const accountMeta = getResidentAccountMeta(resident);
 
             return (
-              <tr key={resident._id} onClick={() => setViewingResident(resident)} className="table-row-clickable">
+              <tr key={resident._id} onClick={() => openResidentModal(resident)} className="table-row-clickable">
                 <td><div className="table-name-cell"><div className="table-avatar">{resident.familyName?.[0]}</div><span className="table-family-name">{resident.familyName}</span></div></td>
                 <td><span className="table-username">@{resident.username}</span></td>
                 <td className="table-email">{getResidentOccupancyLabel(resident)}</td>
@@ -1360,6 +1366,12 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
                 <td>{formatResidentDate(resident.createdAt, 'Unknown')}</td>
                 <td onClick={e => e.stopPropagation()}>
                   <button onClick={() => setViewingDocument(resident)} className="btn-view-document btn-view-document-sm"><Eye size={14} /> View</button>
+                </td>
+                <td onClick={e => e.stopPropagation()}>
+                  <div className="table-actions">
+                    <button onClick={() => openResidentModal(resident, 'edit')} className="btn-view-document btn-view-document-sm"><User size={14} /> Edit</button>
+                    <button onClick={() => deleteResidentAccount(resident._id)} className="btn-reject btn-reject-sm"><XCircle size={14} /> Delete</button>
+                  </div>
                 </td>
               </tr>
             );
@@ -1377,7 +1389,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
         </thead>
         <tbody>
           {residents.map(resident => (
-            <tr key={resident._id} onClick={() => setViewingResident(resident)} className="table-row-clickable">
+            <tr key={resident._id} onClick={() => openResidentModal(resident)} className="table-row-clickable">
               <td><div className="table-name-cell"><div className="table-avatar">{resident.familyName?.[0]}</div><span className="table-family-name">{resident.familyName}</span></div></td>
               <td><span className="table-username">@{resident.username}</span></td>
               <td className="table-email">{getResidentOccupancyLabel(resident)}</td>
@@ -1711,7 +1723,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
                         const accountMeta = getResidentAccountMeta(r);
 
                         return (
-                          <div key={r._id} className="resident-card resident-card-clickable" onClick={() => setViewingResident(r)}>
+                          <div key={r._id} className="resident-card resident-card-clickable" onClick={() => openResidentModal(r)}>
                             <div className="resident-card-status-row">
                               <span className={accountMeta.className}>{accountMeta.label}</span>
                               {r.renewalStatus === 'pending' && <span className="resident-inline-note">Renewal queued</span>}
@@ -1752,7 +1764,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
                   </div>
                   {residentViewMode === 'card'
                     ? <div className="residents-grid">{pendingResidents.map(r => (
-                        <div key={r._id} className="resident-card resident-card-clickable resident-card-pending" onClick={() => setViewingResident(r)}>
+                        <div key={r._id} className="resident-card resident-card-clickable resident-card-pending" onClick={() => openResidentModal(r)}>
                           <div className="pending-badge-top">Pending Approval</div>
                           <div className="card-summary-static">
                             <div className="resident-avatar-circle resident-avatar-pending">{r.familyName?.[0] || 'R'}</div>
@@ -1776,7 +1788,10 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
         {viewingResident && (
           <ResidentDetailModal
             resident={viewingResident}
-            onClose={() => setViewingResident(null)}
+            onClose={() => {
+              setViewingResident(null);
+              setResidentModalMode('view');
+            }}
             isPending={!viewingResident.isApproved}
             onApprove={approveResident}
             onReject={rejectResident}
@@ -1787,6 +1802,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
             onDeleteResident={deleteResidentAccount}
             isUpdatingResident={residentMutation.id === viewingResident._id && residentMutation.action === 'update'}
             isDeletingResident={residentMutation.id === viewingResident._id && residentMutation.action === 'delete'}
+            startInEditMode={residentModalMode === 'edit'}
           />
         )}
         {viewingDocument && (
@@ -2021,9 +2037,9 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
                           )}
                         </td>
                         <td>
-                          {isQrManagedVisitor(visitor) && (visitor.qrManualCode || visitor.qrToken) ? (
+                          {isQrManagedVisitor(visitor) && getVisitorAccessCode(visitor) ? (
                             <>
-                              <span className="module-table__code">{formatVisitorAccessCode(visitor.qrManualCode || visitor.qrToken)}</span>
+                              <span className="module-table__code">{formatVisitorAccessCode(getVisitorAccessCode(visitor))}</span>
                               <span className="module-table__secondary">Short code for QR fallback</span>
                             </>
                           ) : (
@@ -2091,10 +2107,10 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
                       ))}
                     </div>
                   )}
-                  {isQrManagedVisitor(visitor) && (visitor.qrManualCode || visitor.qrToken) && (
+                  {isQrManagedVisitor(visitor) && getVisitorAccessCode(visitor) && (
                     <div className="admin-visitor-code-card">
                       <span className="admin-visitor-code-label">Visitor Code</span>
-                      <strong>{formatVisitorAccessCode(visitor.qrManualCode || visitor.qrToken)}</strong>
+                      <strong>{formatVisitorAccessCode(getVisitorAccessCode(visitor))}</strong>
                       <p>Residents and guards can use this short code whenever QR camera scanning is unavailable.</p>
                     </div>
                   )}

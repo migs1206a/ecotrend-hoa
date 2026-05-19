@@ -115,10 +115,10 @@ const generateQrManualCode = (length = 8) =>
   Array.from({ length }, () => QR_MANUAL_CODE_ALPHABET[crypto.randomInt(0, QR_MANUAL_CODE_ALPHABET.length)]).join('');
 
 const normalizeIdentificationNumber = (value) => {
-  const normalized = String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const normalized = String(value || '').trim().replace(/\D/g, '');
 
-  if (!normalized || normalized.length > 16) {
-    return { error: 'Visitor Identification ID Number must be letters/numbers only and up to 16 characters.' };
+  if (!normalized || normalized.length > 12) {
+    return { error: 'Visitor Identification ID Number must contain digits only and be up to 12 numbers.' };
   }
 
   return { value: normalized };
@@ -152,6 +152,20 @@ const normalizeOptionalDate = (value) => {
   return Number.isNaN(date.getTime()) ? undefined : date;
 };
 
+const validateFutureExpectedDate = (value) => {
+  const normalizedDate = normalizeOptionalDate(value);
+
+  if (!normalizedDate) {
+    return { error: 'Expected arrival date and time is required.' };
+  }
+
+  if (normalizedDate.getTime() < Date.now()) {
+    return { error: 'Expected arrival date and time must be in the future.' };
+  }
+
+  return { value: normalizedDate };
+};
+
 const ensureResidentOwnsVisitor = (req, visitor) => {
   const role = String(req.user?.role || '').toUpperCase();
   if (role !== 'RESIDENT') return true;
@@ -160,12 +174,17 @@ const ensureResidentOwnsVisitor = (req, visitor) => {
   return userId && String(visitor.hostResident) === userId;
 };
 
+const VISITOR_QR_PAYLOAD_PREFIX = 'ECOTREND_VISITOR_QR:';
+
 const normalizeQrCredential = (value) => {
   const trimmed = String(value || '').trim();
+  const normalizedValue = trimmed.startsWith(VISITOR_QR_PAYLOAD_PREFIX)
+    ? trimmed.slice(VISITOR_QR_PAYLOAD_PREFIX.length).trim()
+    : trimmed;
 
   return {
-    qrToken: trimmed.toLowerCase(),
-    qrManualCode: trimmed.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+    qrToken: normalizedValue.toLowerCase(),
+    qrManualCode: normalizedValue.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
   };
 };
 
@@ -577,6 +596,11 @@ exports.preRegisterVisitor = async (req, res) => {
       });
     }
 
+    const expectedDateValidation = validateFutureExpectedDate(expectedDate);
+    if (expectedDateValidation.error) {
+      return res.status(400).json({ message: expectedDateValidation.error });
+    }
+
     const visitor = new Visitor({
       name: nameValidation.value,
       contactNumber: contactNumberValidation.value,
@@ -592,7 +616,7 @@ exports.preRegisterVisitor = async (req, res) => {
       vehicleType,
       vehicleColor,
       accompanyingVisitors: companionsValidation.value,
-      expectedDate: normalizeOptionalDate(expectedDate),
+      expectedDate: expectedDateValidation.value,
       preRegisteredBy,
       reviewStatus: normalizedEntryType === 'visitor' ? 'pending' : 'approved',
       status: 'pre-registered'

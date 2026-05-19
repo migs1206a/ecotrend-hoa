@@ -11,7 +11,7 @@ import PaginationControls from '../common/PaginationControls';
 import { buildPaginatedUrl, parsePaginatedResponse } from '../../utils/pagination';
 import FacilityReservationCalendar from './FacilityReservationCalendar';
 import {
-  FACILITY_GUEST_QR_PAYLOAD_PREFIX,
+  buildFacilityGuestQrPayload,
   formatFacilityGuestQrAccessCode,
   getFacilityGuestQrAccessCode,
   getFacilityGuestQrMeta,
@@ -54,12 +54,14 @@ const FacilityGuestQrModal = ({ reservation, onClose, onCopyCode }) => {
     let cancelled = false;
 
     const buildQr = async () => {
-      if (!guestQr.enabled || !guestQr.token) {
+      const qrPayload = buildFacilityGuestQrPayload(reservation);
+
+      if (!guestQr.enabled || !qrPayload) {
         setQrDataUrl('');
         return;
       }
 
-      const dataUrl = await QRCode.toDataURL(`${FACILITY_GUEST_QR_PAYLOAD_PREFIX}${guestQr.token}`, {
+      const dataUrl = await QRCode.toDataURL(qrPayload, {
         width: 240,
         margin: 1,
         errorCorrectionLevel: 'M'
@@ -75,7 +77,7 @@ const FacilityGuestQrModal = ({ reservation, onClose, onCopyCode }) => {
     return () => {
       cancelled = true;
     };
-  }, [guestQr.enabled, guestQr.token]);
+  }, [guestQr.enabled, guestQr.manualCode, guestQr.token]);
 
   if (!guestQr.enabled) {
     return null;
@@ -153,7 +155,7 @@ const FacilityGuestQrModal = ({ reservation, onClose, onCopyCode }) => {
   );
 };
 
-const ResidentFacilityReservation = ({ token }) => {
+const ResidentFacilityReservation = ({ token, showAlert }) => {
   const [reservations, setReservations] = useState([]);
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -310,9 +312,29 @@ const ResidentFacilityReservation = ({ token }) => {
   }, [selectedFacility, formData.eventType]);
 
   const totalAmount = (selectedFacility.hourlyRate || 0) * Number(formData.durationHours || 1);
+  const notify = useCallback((message, type = 'info') => {
+    if (typeof showAlert === 'function') {
+      showAlert(message, type);
+      return;
+    }
+
+    window.alert(message);
+  }, [showAlert]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    const selectedDate = formData.dateReserved ? new Date(formData.dateReserved) : null;
+
+    if (!selectedDate || Number.isNaN(selectedDate.getTime())) {
+      notify('Please choose a valid reservation date and time.', 'error');
+      return;
+    }
+
+    if (selectedDate.getTime() < Date.now()) {
+      notify('Reservation date and time must be in the future.', 'error');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -331,10 +353,11 @@ const ResidentFacilityReservation = ({ token }) => {
 
       const data = await response.json();
       if (response.ok) {
-        window.alert(
+        notify(
           data.paymentRequired
             ? 'Reservation submitted. Please scan the GCash QR and upload your receipt for verification.'
-            : 'Reservation submitted. This facility is free and now waiting for admin approval.'
+            : 'Reservation submitted. This facility is free and now waiting for admin approval.',
+          'success'
         );
         setFormData({
           facilityId: facilityOptions[0]?._id || '',
@@ -347,11 +370,11 @@ const ResidentFacilityReservation = ({ token }) => {
         setShowForm(false);
         fetchMyReservations();
       } else {
-        window.alert(data.message || 'Failed to create reservation');
+        notify(data.message || 'Failed to create reservation', 'error');
       }
     } catch (error) {
       console.error('Error creating reservation:', error);
-      window.alert('Failed to create reservation');
+      notify('Failed to create reservation', 'error');
     }
 
     setLoading(false);
@@ -360,7 +383,7 @@ const ResidentFacilityReservation = ({ token }) => {
   const handleReceiptUpload = async (reservationId) => {
     const receiptFile = receiptFiles[reservationId];
     if (!receiptFile) {
-      window.alert('Please select a receipt file');
+      notify('Please select a receipt file', 'error');
       return;
     }
 
@@ -377,15 +400,15 @@ const ResidentFacilityReservation = ({ token }) => {
       const data = await response.json();
 
       if (response.ok) {
-        window.alert('Receipt uploaded successfully!');
+        notify('Receipt uploaded successfully!', 'success');
         setReceiptFiles((prev) => ({ ...prev, [reservationId]: null }));
         fetchMyReservations();
       } else {
-        window.alert(data.message || 'Failed to upload receipt');
+        notify(data.message || 'Failed to upload receipt', 'error');
       }
     } catch (error) {
       console.error('Error uploading receipt:', error);
-      window.alert('Failed to upload receipt');
+      notify('Failed to upload receipt', 'error');
     }
 
     setUploadingReceipt(null);
@@ -407,7 +430,7 @@ const ResidentFacilityReservation = ({ token }) => {
     });
 
     if (!validation.valid) {
-      window.alert(validation.message);
+      notify(validation.message, 'error');
       event.target.value = '';
       return;
     }
@@ -486,21 +509,21 @@ const ResidentFacilityReservation = ({ token }) => {
   const handleCopyGuestQrCode = async (value) => {
     const code = String(value || '').trim();
     if (!code) {
-      window.alert('No guest gate code is available for this reservation yet.');
+      notify('No guest gate code is available for this reservation yet.', 'error');
       return;
     }
 
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(code);
-        window.alert('Guest gate code copied.');
+        notify('Guest gate code copied.', 'success');
         return;
       }
     } catch (error) {
       console.error('Error copying facility guest QR code:', error);
     }
 
-    window.alert(`Guest gate code: ${code}`);
+    notify(`Guest gate code: ${code}`, 'info');
   };
 
   const closeReservationForm = () => {
@@ -557,7 +580,7 @@ const ResidentFacilityReservation = ({ token }) => {
               className="facility-qr-view-btn"
               onClick={() => {
                 if (!settings?.gcashQr?.path) {
-                  window.alert('Admin has not uploaded a GCash QR code yet.');
+                  notify('Admin has not uploaded a GCash QR code yet.', 'error');
                   return;
                 }
                 setViewingQr(true);

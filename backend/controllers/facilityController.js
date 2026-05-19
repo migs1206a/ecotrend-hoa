@@ -174,12 +174,17 @@ const buildActorSnapshot = (user = {}) => ({
   role: String(user.role || '').trim()
 });
 
+const FACILITY_GUEST_QR_PAYLOAD_PREFIX = 'ECOTREND_FACILITY_GUEST_QR:';
+
 const normalizeQrCredential = (value) => {
   const trimmed = String(value || '').trim();
+  const normalizedValue = trimmed.startsWith(FACILITY_GUEST_QR_PAYLOAD_PREFIX)
+    ? trimmed.slice(FACILITY_GUEST_QR_PAYLOAD_PREFIX.length).trim()
+    : trimmed;
 
   return {
-    qrToken: trimmed.toLowerCase(),
-    qrManualCode: trimmed.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+    qrToken: normalizedValue.toLowerCase(),
+    qrManualCode: normalizedValue.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
   };
 };
 
@@ -299,6 +304,11 @@ const getFacilityGuestQrSummary = (reservation) => {
   };
 };
 
+const isFacilityReservationWindowClosed = (reservation) => {
+  const reservationEnd = new Date(reservation?.endDateTime || reservation?.dateReserved || 0);
+  return !Number.isNaN(reservationEnd.getTime()) && reservationEnd.getTime() < Date.now();
+};
+
 const markFacilityGuestCheckpoint = (reservation, checkpoint, actor, mode = 'scan') => {
   if (!VALID_FACILITY_QR_CHECKPOINTS.has(checkpoint)) {
     return { error: 'Please choose a valid facility guest gate checkpoint.' };
@@ -317,6 +327,10 @@ const markFacilityGuestCheckpoint = (reservation, checkpoint, actor, mode = 'sca
 
   const entryUsed = Math.max(0, Math.min(guestLimit, Math.floor(Number(reservation.guestQrEntryUsed) || 0)));
   const exitUsed = Math.max(0, Math.min(entryUsed, Math.floor(Number(reservation.guestQrExitUsed) || 0)));
+
+  if (checkpoint === 'gate_entry' && isFacilityReservationWindowClosed(reservation)) {
+    return { error: 'The reserved time window has already passed. No more guest entries can be recorded for this reservation.' };
+  }
 
   if (checkpoint === 'gate_entry' && entryUsed >= guestLimit) {
     return { error: 'Gate entry is already complete for all expected guests in this reservation.' };

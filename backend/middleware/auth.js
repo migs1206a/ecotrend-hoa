@@ -100,7 +100,11 @@ const buildFreshUserSnapshot = async (decoded) => {
 
 const auth = async (req, res, next) => {
   try {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
+    const authorizationToken = req.header('Authorization')?.replace('Bearer ', '');
+    const queryToken = typeof req.query?.token === 'string'
+      ? req.query.token.trim()
+      : '';
+    const token = authorizationToken || queryToken;
     
     if (!token) {
       return res.status(401).json({ message: 'No token, authorization denied' });

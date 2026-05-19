@@ -34,8 +34,14 @@ import {
   isResidentAccessRestricted
 } from '../../utils/residentAccounts';
 import { SUBDIVISION_MAP_MODULE } from '../../utils/adminPermissions';
+import {
+  buildVisitorQrPayload,
+  extractVisitorQrCredential,
+  formatVisitorAccessCode,
+  getVisitorAccessCode
+} from '../../utils/visitorQr';
+import { getVisitorEtaState } from '../../utils/visitEta';
 
-const QR_PAYLOAD_PREFIX = 'ECOTREND_VISITOR_QR:';
 const VISITOR_ID_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png'];
 
 const getVisitorDateLabel = (visitor) => {
@@ -44,25 +50,35 @@ const getVisitorDateLabel = (visitor) => {
   return Number.isNaN(date.getTime()) ? 'No date yet' : date.toLocaleDateString();
 };
 
+const getVisitorReviewState = (visitor) => {
+  const reviewStatus = String(visitor?.reviewStatus || '').trim().toLowerCase();
+  if (reviewStatus) return reviewStatus;
+
+  const status = String(visitor?.status || '').trim().toLowerCase();
+  if (status === 'rejected') return 'rejected';
+  if (status === 'pre-registered') return 'pending';
+  return 'approved';
+};
+
 const getVisitorStatusLabel = (visitor) => {
-  if (visitor.status === 'rejected' || visitor.reviewStatus === 'rejected') return 'Rejected';
-  if (visitor.reviewStatus === 'pending') return 'Pending Review';
+  const reviewState = getVisitorReviewState(visitor);
+  if (visitor.status === 'rejected' || reviewState === 'rejected') return 'Rejected';
+  if (reviewState === 'pending') return 'Pending';
   if (visitor.status === 'inside') return 'Inside';
   if (visitor.status === 'exited') return 'Exited';
   return 'Approved';
 };
 
 const getVisitorStatusTone = (visitor) => {
-  if (visitor.status === 'rejected' || visitor.reviewStatus === 'rejected') return 'rejected';
-  if (visitor.reviewStatus === 'pending') return 'pending';
+  const reviewState = getVisitorReviewState(visitor);
+  if (visitor.status === 'rejected' || reviewState === 'rejected') return 'rejected';
+  if (reviewState === 'pending') return 'pending';
   if (visitor.status === 'inside') return 'inside';
   if (visitor.status === 'exited') return 'exited';
   return 'approved';
 };
 
 const getVisitorPartySize = (visitor) => 1 + (Array.isArray(visitor?.accompanyingVisitors) ? visitor.accompanyingVisitors.length : 0);
-const getVisitorAccessCode = (visitor) => String(visitor?.qrManualCode || visitor?.qrToken || '').trim();
-const formatVisitorAccessCode = (value) => String(value || '').trim().match(/.{1,4}/g)?.join('\n') || '';
 const getCheckpointProgress = (visitor, checkpoint) => {
   const checkpoints = Array.isArray(visitor?.qrCheckpoints) ? visitor.qrCheckpoints : [];
   const matching = checkpoints.filter((item) => item.checkpoint === checkpoint);
@@ -85,12 +101,14 @@ const VisitorQrModal = ({ visitor, onClose, onForgottenScan, onCopyCode, onRecor
     let cancelled = false;
 
     const buildQr = async () => {
-      if (!visitor?.qrEntryEnabled || !visitor?.qrToken) {
+      const qrPayload = buildVisitorQrPayload(visitor);
+
+      if (!visitor?.qrEntryEnabled || !qrPayload) {
         setQrDataUrl('');
         return;
       }
 
-      const dataUrl = await QRCode.toDataURL(`${QR_PAYLOAD_PREFIX}${visitor.qrToken}`, {
+      const dataUrl = await QRCode.toDataURL(qrPayload, {
         width: 220,
         margin: 1,
         errorCorrectionLevel: 'M'
@@ -106,7 +124,7 @@ const VisitorQrModal = ({ visitor, onClose, onForgottenScan, onCopyCode, onRecor
     return () => {
       cancelled = true;
     };
-  }, [visitor?.qrEntryEnabled, visitor?.qrToken]);
+  }, [visitor?.qrEntryEnabled, visitor?.qrManualCode, visitor?.qrToken]);
 
   useEffect(() => {
     setResidentScanInput(accessCode);
@@ -270,6 +288,7 @@ const ResidentDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const [viewingVisitorQr, setViewingVisitorQr] = useState(null);
   const [visitorHistoryQuery, setVisitorHistoryQuery] = useState('');
   const [visitorHistoryViewMode, setVisitorHistoryViewMode] = useState('card');
+  const [dismissedEtaVisitorIds, setDismissedEtaVisitorIds] = useState({});
 
   const [visitorForm, setVisitorForm] = useState({
   entryType: 'visitor',
@@ -290,11 +309,11 @@ const ResidentDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const token = localStorage.getItem('token');
   const sanitizePlateNumberInput = (value, maxLength = 10) =>
     String(value || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, maxLength);
-  const sanitizeIdInput = (value, maxLength = 16) =>
-    String(value || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, maxLength);
+  const sanitizeIdInput = (value, maxLength = 12) =>
+    String(value || '').replace(/\D/g, '').slice(0, maxLength);
   const textOnlyPattern = /^[A-Za-z\s.'-]+$/;
   const purposePattern = /^[A-Za-z\s.,'-]+$/;
-  const idPattern = /^[A-Z0-9]{1,16}$/;
+  const idPattern = /^\d{1,12}$/;
 
   const addAccompanyingVisitor = () => {
     setVisitorForm((current) => ({
@@ -314,7 +333,7 @@ const ResidentDashboard = ({ onLogout, showConfirm, showAlert }) => {
         const sanitizedValue = ['lastName', 'firstName'].includes(field)
           ? sanitizeNameInput(value, 30)
           : field === 'identification'
-            ? sanitizeIdInput(value, 16)
+            ? sanitizeIdInput(value, 12)
             : String(value || '').replace(/[^a-zA-Z\s.'-]/g, '').slice(0, 40);
         return { ...companion, [field]: sanitizedValue };
       })
@@ -404,7 +423,7 @@ const ResidentDashboard = ({ onLogout, showConfirm, showAlert }) => {
   };
 
   const handleResidentQrCheckpoint = async (visitor, rawCredential, checkpoint) => {
-    const credential = String(rawCredential || '').trim();
+    const credential = extractVisitorQrCredential(rawCredential);
 
     if (!credential) {
       showAlert('Enter the visitor code or paste the QR token before recording this home checkpoint.', 'error');
@@ -885,9 +904,9 @@ const handlePermanentDelete = (vehicleId) => {
   }
 
   if (entryType === 'visitor') {
-    const visitorId = sanitizeIdInput(visitorForm.visitorIdentification, 16);
+    const visitorId = sanitizeIdInput(visitorForm.visitorIdentification, 12);
     if (!idPattern.test(visitorId)) {
-      showAlert('Visitor Identification ID Number must be letters/numbers only and up to 16 characters.', 'error');
+      showAlert('Visitor Identification ID Number must contain digits only and be up to 12 numbers.', 'error');
       return;
     }
 
@@ -940,7 +959,7 @@ const handlePermanentDelete = (vehicleId) => {
       const companion = visitorForm.accompanyingVisitors[index];
       const label = `Companion ${index + 1}`;
       const relationshipToResident = String(companion.relationshipToResident || '').trim();
-      const identification = sanitizeIdInput(companion.identification, 16);
+      const identification = sanitizeIdInput(companion.identification, 12);
 
       if (!relationshipToResident || !companion.lastName || !companion.firstName || !identification) {
         showAlert(`Please complete relationship, name, and identification for ${label}`, 'error');
@@ -953,7 +972,7 @@ const handlePermanentDelete = (vehicleId) => {
       }
 
       if (!idPattern.test(identification)) {
-        showAlert(`${label} ID number must be letters/numbers only and up to 16 characters.`, 'error');
+        showAlert(`${label} ID number must contain digits only and be up to 12 numbers.`, 'error');
         return;
       }
 
@@ -986,9 +1005,25 @@ const handlePermanentDelete = (vehicleId) => {
 
   setLoading(true);
   try {
-    const visitorIdNumber = sanitizeIdInput(visitorForm.visitorIdentification, 16);
+    const visitorIdNumber = sanitizeIdInput(visitorForm.visitorIdentification, 12);
     const cleanedPurpose = String(visitorForm.purposeOfVisit || '').trim();
     const cleanedVehicleColor = String(visitorForm.vehicleColor || '').trim();
+    const expectedDate = visitorForm.expectedDate ? new Date(visitorForm.expectedDate) : null;
+    if (!expectedDate) {
+      showAlert('Please enter the expected arrival date and time.', 'error');
+      setLoading(false);
+      return;
+    }
+    if (expectedDate && Number.isNaN(expectedDate.getTime())) {
+      showAlert('Please choose a valid expected arrival date and time.', 'error');
+      setLoading(false);
+      return;
+    }
+    if (expectedDate && expectedDate.getTime() < Date.now()) {
+      showAlert('Expected arrival date and time must be in the future.', 'error');
+      setLoading(false);
+      return;
+    }
     if (cleanedVehicleColor && (cleanedVehicleColor.length > 20 || !textOnlyPattern.test(cleanedVehicleColor))) {
       showAlert('Vehicle color must be text only and up to 20 characters.', 'error');
       setLoading(false);
@@ -1083,11 +1118,13 @@ const handlePermanentDelete = (vehicleId) => {
       );
     }
 
-    if (visitor.reviewStatus === 'pending') {
+    const reviewState = getVisitorReviewState(visitor);
+
+    if (reviewState === 'pending') {
       return <span className="vr-inline-note">Waiting for admin review</span>;
     }
 
-    if (visitor.reviewStatus === 'approved') {
+    if (reviewState === 'approved') {
       return <span className="vr-inline-note">Approved without QR entry</span>;
     }
 
@@ -1109,7 +1146,7 @@ const handlePermanentDelete = (vehicleId) => {
 
   const visitorHistorySummary = useMemo(() => ({
     total: recentVisitors.length,
-    pending: recentVisitors.filter((visitor) => visitor.reviewStatus === 'pending').length,
+    pending: recentVisitors.filter((visitor) => getVisitorReviewState(visitor) === 'pending').length,
     qrReady: recentVisitors.filter((visitor) => visitor.qrEntryEnabled || getVisitorAccessCode(visitor)).length,
     inside: recentVisitors.filter((visitor) => visitor.status === 'inside').length
   }), [recentVisitors]);
@@ -1730,10 +1767,12 @@ const handlePermanentDelete = (vehicleId) => {
     <input
       type="text"
       value={visitorForm.visitorIdentification}
-      onChange={(e) => setVisitorForm({ ...visitorForm, visitorIdentification: sanitizeIdInput(e.target.value, 16) })}
+      onChange={(e) => setVisitorForm({ ...visitorForm, visitorIdentification: sanitizeIdInput(e.target.value, 12) })}
       placeholder="ID number"
       className="form-input"
-      maxLength={16}
+      inputMode="numeric"
+      pattern="\d{1,12}"
+      maxLength={12}
       required
     />
   </div>
@@ -1823,7 +1862,9 @@ const handlePermanentDelete = (vehicleId) => {
               onChange={(e) => updateAccompanyingVisitor(index, 'identification', e.target.value)}
               placeholder="ID number"
               className="form-input"
-              maxLength={16}
+              inputMode="numeric"
+              pattern="\d{1,12}"
+              maxLength={12}
             />
           </div>
         </div>
@@ -1867,6 +1908,7 @@ const handlePermanentDelete = (vehicleId) => {
                   type="datetime-local"
                   value={visitorForm.expectedDate}
                   onChange={(e) => setVisitorForm({ ...visitorForm, expectedDate: e.target.value })}
+                  min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
                   className="form-input vr-datetime-input"
                 />
               </div>
@@ -2023,7 +2065,12 @@ const handlePermanentDelete = (vehicleId) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRecentVisitors.map((visitor) => (
+                  {filteredRecentVisitors.map((visitor) => {
+                    const etaState = getVisitorEtaState(visitor, {
+                      dismissed: dismissedEtaVisitorIds[visitor._id]
+                    });
+
+                    return (
                     <tr key={visitor._id}>
                       <td>
                         <span className="module-table__primary">{visitor.name}</span>
@@ -2042,6 +2089,20 @@ const handlePermanentDelete = (vehicleId) => {
                       <td>
                         <span className="module-table__primary">{visitor.expectedDate ? new Date(visitor.expectedDate).toLocaleString() : 'Any time'}</span>
                         <span className="module-table__secondary">Created {new Date(visitor.createdAt).toLocaleDateString()}</span>
+                        {etaState && (
+                          <span className={`module-table__secondary ${etaState.tone}`}>
+                            {etaState.label}
+                            {etaState.kind === 'eta_not_met' && (
+                              <button
+                                type="button"
+                                className="module-table__inline-dismiss"
+                                onClick={() => setDismissedEtaVisitorIds((current) => ({ ...current, [visitor._id]: true }))}
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </span>
+                        )}
                       </td>
                       <td>
                         <span className={`module-table__pill ${getVisitorStatusTone(visitor)}`}>
@@ -2061,14 +2122,20 @@ const handlePermanentDelete = (vehicleId) => {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           </div>
         ) : (
           <div className="vr-history-grid">
-            {filteredRecentVisitors.map((visitor) => (
+            {filteredRecentVisitors.map((visitor) => {
+              const etaState = getVisitorEtaState(visitor, {
+                dismissed: dismissedEtaVisitorIds[visitor._id]
+              });
+
+              return (
               <article key={visitor._id} className="vr-item vr-item--history">
                 <div className="vr-avatar">{visitor.name?.[0]?.toUpperCase() || '?'}</div>
                 <div className="vr-item-info">
@@ -2084,12 +2151,27 @@ const handlePermanentDelete = (vehicleId) => {
                     <span>{visitor.expectedDate ? new Date(visitor.expectedDate).toLocaleString() : 'Any time'}</span>
                     <span>Party size: {getVisitorPartySize(visitor)}</span>
                   </div>
+                  {etaState && (
+                    <div className={`vr-inline-note ${etaState.tone}`}>
+                      {etaState.label}
+                      {etaState.kind === 'eta_not_met' && (
+                        <button
+                          type="button"
+                          className="vr-inline-dismiss"
+                          onClick={() => setDismissedEtaVisitorIds((current) => ({ ...current, [visitor._id]: true }))}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <div className="vr-item-actions">
                     {renderVisitorQrAction(visitor)}
                   </div>
                 </div>
               </article>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -2103,7 +2185,7 @@ const handlePermanentDelete = (vehicleId) => {
     );
 
     if (activeModule === 'announcements') return wrapModule(<ResidentAnnouncements token={token} />);
-    if (activeModule === 'facilities')   return wrapModule(<ResidentFacilityReservation token={token} />);
+    if (activeModule === 'facilities')   return wrapModule(<ResidentFacilityReservation token={token} showAlert={showAlert} />);
     if (activeModule === 'complaints')   return wrapModule(<ResidentComplaintManagement token={token} userId={user.id} showAlert={showAlert} />);
     if (activeModule === 'billing')      return wrapModule(<ResidentBillingManagement token={token} userId={user.id} showAlert={showAlert} />);
     if (activeModule === 'documents')    return wrapModule(<ResidentDocumentsManagement token={token} showAlert={showAlert} />);

@@ -21,6 +21,11 @@ export const getFacilityGuestQrAccessCode = (reservation) => {
 export const formatFacilityGuestQrAccessCode = (value) =>
   String(value || '').trim().match(/.{1,4}/g)?.join('\n') || '';
 
+export const buildFacilityGuestQrPayload = (reservation) => {
+  const accessCode = getFacilityGuestQrAccessCode(reservation);
+  return accessCode;
+};
+
 export const extractFacilityGuestQrToken = (rawValue = '') => {
   const value = String(rawValue || '').trim();
 

@@ -22,21 +22,17 @@ import {
   validateNameValue,
   validatePhoneNumberValue
 } from '../../utils/formSecurity';
+import {
+  extractVisitorQrCredential,
+  formatVisitorAccessCode,
+  getVisitorAccessCode,
+  isQrManagedVisitor
+} from '../../utils/visitorQr';
 
-const QR_PAYLOAD_PREFIX = 'ECOTREND_VISITOR_QR:';
 const QR_CHECKPOINT_OPTIONS = [
   { value: 'gate_entry', label: 'Gate Entrance' },
-  { value: 'home_arrival', label: 'Home Entrance' },
-  { value: 'home_exit', label: 'Home Exit' },
   { value: 'gate_exit', label: 'Gate Exit' }
 ];
-const getVisitorAccessCode = (visitor) => String(visitor?.qrManualCode || visitor?.qrToken || '').trim();
-const isQrManagedVisitor = (visitor) => Boolean(
-  visitor?.qrEntryEnabled ||
-  getVisitorAccessCode(visitor) ||
-  (Array.isArray(visitor?.qrCheckpoints) && visitor.qrCheckpoints.length > 0)
-);
-const formatVisitorAccessCode = (value) => String(value || '').trim().match(/.{1,4}/g)?.join('\n') || '';
 const getCheckpointProgress = (visitor, checkpoint) => {
   const checkpoints = Array.isArray(visitor?.qrCheckpoints) ? visitor.qrCheckpoints : [];
   const matching = checkpoints.filter((item) => item.checkpoint === checkpoint);
@@ -167,18 +163,8 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
 
   useEffect(() => stopQrScanner, [stopQrScanner]);
 
-  const extractQrToken = (rawValue = '') => {
-    const value = String(rawValue || '').trim();
-
-    if (value.startsWith(QR_PAYLOAD_PREFIX)) {
-      return value.slice(QR_PAYLOAD_PREFIX.length).trim();
-    }
-
-    return value;
-  };
-
   const submitQrScan = async (rawValue) => {
-    const qrToken = extractQrToken(rawValue);
+    const qrToken = extractVisitorQrCredential(rawValue);
 
     if (!qrToken) {
       showAlert('Please scan a valid QR pass or enter the short visitor code.', 'error');
@@ -780,21 +766,7 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
   };
 
   const promptForgottenQrCheckpoint = (visitor, direction) => {
-    const place = window.prompt(`Forgot to scan ${direction}. Type HOME or GATE:`);
-    const normalizedPlace = String(place || '').trim().toLowerCase();
-    let checkpoint = '';
-
-    if (direction === 'entrance' && normalizedPlace === 'gate') checkpoint = 'gate_entry';
-    if (direction === 'entrance' && normalizedPlace === 'home') checkpoint = 'home_arrival';
-    if (direction === 'exit' && normalizedPlace === 'home') checkpoint = 'home_exit';
-    if (direction === 'exit' && normalizedPlace === 'gate') checkpoint = 'gate_exit';
-
-    if (!checkpoint) {
-      if (normalizedPlace) showAlert('Please type HOME or GATE for the forgotten scan location.', 'error');
-      return;
-    }
-
-    handleForgottenQrCheckpoint(visitor, checkpoint);
+    handleForgottenQrCheckpoint(visitor, direction === 'entrance' ? 'gate_entry' : 'gate_exit');
   };
 
   const filteredResidents  = residents.filter(r => r.familyName.toLowerCase().includes(residentSearchQuery.toLowerCase()) || r.houseAddress.toLowerCase().includes(residentSearchQuery.toLowerCase()) || r.street.toLowerCase().includes(residentSearchQuery.toLowerCase()));
