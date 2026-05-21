@@ -76,6 +76,8 @@ const AdminAuditLogs = ({ token, showAlert }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [moduleFilter, setModuleFilter] = useState('');
   const [eventTypeFilter, setEventTypeFilter] = useState('');
+  const [coverageStartDate, setCoverageStartDate] = useState('');
+  const [coverageEndDate, setCoverageEndDate] = useState('');
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [archiveWindowDays, setArchiveWindowDays] = useState(30);
   const [archiveLoading, setArchiveLoading] = useState(false);
@@ -95,12 +97,19 @@ const AdminAuditLogs = ({ token, showAlert }) => {
 
   const fetchLogs = useCallback(async (targetPage = 1) => {
     try {
+      const coverageParams = coverageStartDate && coverageEndDate
+        ? {
+            startDate: coverageStartDate,
+            endDate: coverageEndDate
+          }
+        : {};
       const response = await fetch(
         apiUrl(
           buildPaginatedUrl(API, targetPage, {
             q: searchQuery.trim(),
             module: moduleFilter,
-            eventType: eventTypeFilter
+            eventType: eventTypeFilter,
+            ...coverageParams
           })
         ),
         { headers: headers() }
@@ -119,7 +128,7 @@ const AdminAuditLogs = ({ token, showAlert }) => {
       setPagination(null);
       showAlert && showAlert(error.message || 'Failed to load audit logs', 'error');
     }
-  }, [eventTypeFilter, headers, moduleFilter, searchQuery, showAlert]);
+  }, [coverageEndDate, coverageStartDate, eventTypeFilter, headers, moduleFilter, searchQuery, showAlert]);
 
   const fetchArchives = useCallback(async () => {
     try {
@@ -243,6 +252,10 @@ const AdminAuditLogs = ({ token, showAlert }) => {
     setDownloadingPdf(true);
 
     try {
+      if ((coverageStartDate && !coverageEndDate) || (!coverageStartDate && coverageEndDate)) {
+        throw new Error('Select both coverage dates before downloading the PDF.');
+      }
+
       const params = new URLSearchParams();
       const trimmedQuery = searchQuery.trim();
 
@@ -256,6 +269,11 @@ const AdminAuditLogs = ({ token, showAlert }) => {
 
       if (eventTypeFilter) {
         params.set('eventType', eventTypeFilter);
+      }
+
+      if (coverageStartDate && coverageEndDate) {
+        params.set('startDate', coverageStartDate);
+        params.set('endDate', coverageEndDate);
       }
 
       const queryString = params.toString();
@@ -445,6 +463,31 @@ const AdminAuditLogs = ({ token, showAlert }) => {
               ))}
             </select>
           </label>
+
+          <label className="admin-audit-select admin-audit-select-date">
+            <Clock3 size={16} />
+            <input
+              type="date"
+              value={coverageStartDate}
+              onChange={(event) => {
+                setCoverageStartDate(event.target.value);
+                setPage(1);
+              }}
+            />
+          </label>
+
+          <label className="admin-audit-select admin-audit-select-date">
+            <Clock3 size={16} />
+            <input
+              type="date"
+              value={coverageEndDate}
+              min={coverageStartDate || undefined}
+              onChange={(event) => {
+                setCoverageEndDate(event.target.value);
+                setPage(1);
+              }}
+            />
+          </label>
         </div>
 
         {loading ? (
@@ -492,7 +535,7 @@ const AdminAuditLogs = ({ token, showAlert }) => {
                         {log.action}
                       </span>
                     </td>
-                    <td className="admin-audit-description">{log.description}</td>
+                    <td className="admin-audit-description">{log.descriptionDisplay || log.description}</td>
                     <td>
                       <div className="admin-audit-time">
                         <strong>{formatDateTime(log.createdAt)}</strong>

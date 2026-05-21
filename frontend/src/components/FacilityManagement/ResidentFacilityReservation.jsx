@@ -22,12 +22,9 @@ import {
   formatFileSize,
   validatePdfOrImageFile
 } from '../../utils/uploadValidation';
+import { getNextLocalDateTimeInputValue, getNextMinuteDate } from '../../utils/dateTimeInput';
 
 const formatDateTimeLocal = (value) => new Date(value).toLocaleString();
-const getLocalDateTimeInputValue = (date = new Date()) => {
-  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return localDate.toISOString().slice(0, 16);
-};
 const getMonthRange = (date) => ({
   start: new Date(date.getFullYear(), date.getMonth(), 1),
   end: new Date(date.getFullYear(), date.getMonth() + 1, 1)
@@ -330,7 +327,7 @@ const ResidentFacilityReservation = ({ token, showAlert }) => {
       return;
     }
 
-    if (selectedDate.getTime() < Date.now()) {
+    if (selectedDate.getTime() < getNextMinuteDate().getTime()) {
       notify('Reservation date and time must be in the future.', 'error');
       return;
     }
@@ -984,7 +981,7 @@ const ResidentFacilityReservation = ({ token, showAlert }) => {
                         type="datetime-local"
                         value={formData.dateReserved}
                         onChange={(event) => setFormData((prev) => ({ ...prev, dateReserved: event.target.value }))}
-                        min={getLocalDateTimeInputValue()}
+                        min={getNextLocalDateTimeInputValue()}
                         className="form-input"
                         required
                       />

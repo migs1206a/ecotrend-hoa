@@ -1,4 +1,7 @@
 const AdminAuditLog = require('../models/AdminAuditLog');
+const Admin = require('../models/Admin');
+const Guard = require('../models/Guard');
+const User = require('../models/User');
 const { getUserRoleLabel, isOfficer } = require('./adminPermissions');
 
 const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -62,6 +65,21 @@ const SUBJECT_FIELDS = [
   'driverName',
   'plateNumber'
 ];
+
+const MANAGE_ACCOUNT_MODELS = Object.freeze({
+  admin: {
+    model: Admin,
+    subjectRole: 'ADMIN'
+  },
+  guard: {
+    model: Guard,
+    subjectRole: 'GUARD'
+  },
+  resident: {
+    model: User,
+    subjectRole: 'RESIDENT'
+  }
+});
 
 const truncate = (value, maxLength = 80) => {
   const normalized = String(value || '').trim();
@@ -137,6 +155,114 @@ const pickSubject = (req) => {
   }
 
   return '';
+};
+
+const extractManageAccountTarget = (moduleKey = '', endpoint = '') => {
+  if (moduleKey !== 'manage_accounts') {
+    return null;
+  }
+
+  const match = String(endpoint || '').toLowerCase().match(/\/(admin|guard|resident)\/([a-f0-9]{24})(?:\/|$)/i);
+  if (!match) {
+    return null;
+  }
+
+  const targetKey = String(match[1] || '').toLowerCase();
+  const subjectId = String(match[2] || '').trim();
+  const config = MANAGE_ACCOUNT_MODELS[targetKey];
+
+  if (!config || !subjectId) {
+    return null;
+  }
+
+  return {
+    targetKey,
+    subjectId,
+    subjectRole: config.subjectRole,
+    model: config.model
+  };
+};
+
+const resolveManageAccountSubject = async (target) => {
+  if (!target?.model || !target?.subjectId) {
+    return null;
+  }
+
+  try {
+    const account = await target.model.findById(target.subjectId)
+      .select('username fullName familyName')
+      .lean();
+
+    if (!account) {
+      return null;
+    }
+
+    const subject = String(
+      account.username ||
+      account.fullName ||
+      account.familyName ||
+      ''
+    ).trim();
+
+    return subject
+      ? {
+          subject,
+          metadata: {
+            subjectId: target.subjectId,
+            subjectRole: target.subjectRole,
+            subjectUsername: String(account.username || '').trim()
+          }
+        }
+      : null;
+  } catch (error) {
+    console.error('resolveManageAccountSubject error:', error.message);
+    return null;
+  }
+};
+
+const resolveAuditSubject = async (req, moduleKey = '', endpoint = '') => {
+  const bodySubject = pickSubject(req);
+  if (bodySubject) {
+    return {
+      subject: bodySubject,
+      metadata: {
+        subject: bodySubject
+      }
+    };
+  }
+
+  const manageAccountTarget = extractManageAccountTarget(moduleKey, endpoint);
+  const resolvedManageAccountSubject = await resolveManageAccountSubject(manageAccountTarget);
+  if (resolvedManageAccountSubject?.subject) {
+    return {
+      subject: resolvedManageAccountSubject.subject,
+      metadata: {
+        subject: resolvedManageAccountSubject.subject,
+        ...resolvedManageAccountSubject.metadata
+      }
+    };
+  }
+
+  if (req?.params?.id) {
+    const subjectId = truncate(req.params.id, 40);
+    return {
+      subject: subjectId,
+      metadata: {
+        subject: subjectId,
+        ...(manageAccountTarget?.subjectRole
+          ? {
+              subjectId: manageAccountTarget.subjectId,
+              subjectRole: manageAccountTarget.subjectRole
+            }
+          : {})
+      }
+    };
+  }
+
+  return {
+    subject: '',
+    metadata: {}
+  };
 };
 
 const resolveResourceLabel = (moduleKey, endpoint = '') => {
@@ -349,7 +475,7 @@ const createAdminAuditLogger = () => (req, res, next) => {
 
   req.adminAuditLoggerAttached = true;
 
-  res.on('finish', () => {
+  res.on('finish', async () => {
     if (!req.user || !isOfficer(req.user)) {
       return;
     }
@@ -370,7 +496,7 @@ const createAdminAuditLogger = () => (req, res, next) => {
     }
 
     const endpoint = String(req.originalUrl || req.baseUrl || req.url || '/').split('?')[0];
-    const subject = pickSubject(req);
+    const { subject, metadata: subjectMetadata } = await resolveAuditSubject(req, moduleKey, endpoint);
     const details = buildActionDetails({
       method: req.method,
       endpoint,
@@ -388,7 +514,7 @@ const createAdminAuditLogger = () => (req, res, next) => {
       endpoint,
       statusCode: res.statusCode,
       metadata: {
-        subject,
+        ...subjectMetadata,
         source: 'automatic'
       }
     }).catch((error) => {
@@ -404,8 +530,10 @@ module.exports = {
   buildActorSnapshot,
   createAdminAuditLog,
   createAdminAuditLogger,
+  extractManageAccountTarget,
   getAuditLogExpiryDate,
   getAuditLogRetentionDays,
   getAuditModuleLabel,
+  resolveManageAccountSubject,
   setAuditLogContext
 };

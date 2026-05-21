@@ -58,6 +58,8 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [editingId, setEditingId] = useState('');
   const [togglingPaidId, setTogglingPaidId] = useState('');
+  const [coverageStartDate, setCoverageStartDate] = useState('');
+  const [coverageEndDate, setCoverageEndDate] = useState('');
   const [form, setForm] = useState(buildEmptyForm);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(null);
@@ -72,7 +74,13 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
 
   const fetchLogs = useCallback(async (targetPage = page) => {
     try {
-      const response = await fetch(apiUrl(buildPaginatedUrl('/admin-bill-audit-logs', targetPage)), { headers: headers() });
+      const coverageParams = coverageStartDate && coverageEndDate
+        ? {
+            startDate: coverageStartDate,
+            endDate: coverageEndDate
+          }
+        : {};
+      const response = await fetch(apiUrl(buildPaginatedUrl('/admin-bill-audit-logs', targetPage, coverageParams)), { headers: headers() });
       const data = await response.json();
 
       if (!response.ok) {
@@ -80,6 +88,11 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
       }
 
       const parsed = parsePaginatedResponse(data);
+      if ((parsed.items?.length || 0) === 0 && (parsed.pagination?.total || 0) > 0 && targetPage > 1) {
+        setPage(Math.max(1, parsed.pagination?.totalPages || targetPage - 1));
+        return;
+      }
+
       setLogs(parsed.items);
       setPagination(parsed.pagination);
     } catch (error) {
@@ -87,7 +100,7 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
       setLogs([]);
       setPagination(null);
     }
-  }, [headers, page, showAlert]);
+  }, [coverageEndDate, coverageStartDate, headers, page, showAlert]);
 
   useEffect(() => {
     (async () => {
@@ -128,6 +141,29 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
       unpaidCount: logs.filter((log) => !log.isPaid).length
     };
   }, [logs, pagination]);
+
+  const pageMeta = useMemo(() => {
+    const currentPage = pagination?.page || page;
+    const limit = pagination?.limit || logs.length || 0;
+    const total = pagination?.total || logs.length || 0;
+
+    if (!logs.length || !total) {
+      return {
+        start: 0,
+        end: 0,
+        total
+      };
+    }
+
+    const start = (currentPage - 1) * limit + 1;
+    const end = Math.min(start + logs.length - 1, total);
+
+    return {
+      start,
+      end,
+      total
+    };
+  }, [logs, page, pagination]);
 
   const handleChange = (field, value) => {
     setForm((prev) => ({
@@ -272,7 +308,17 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
     setDownloadingPdf(true);
 
     try {
-      const response = await fetch(apiUrl('/admin-bill-audit-logs/export/pdf'), {
+      if ((coverageStartDate && !coverageEndDate) || (!coverageStartDate && coverageEndDate)) {
+        throw new Error('Select both coverage dates before downloading the PDF.');
+      }
+
+      const params = new URLSearchParams();
+      if (coverageStartDate && coverageEndDate) {
+        params.set('startDate', coverageStartDate);
+        params.set('endDate', coverageEndDate);
+      }
+
+      const response = await fetch(apiUrl(`/admin-bill-audit-logs/export/pdf${params.toString() ? `?${params.toString()}` : ''}`), {
         headers: {
           Authorization: `Bearer ${token}`
         }
@@ -310,6 +356,29 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
           <p>Track admin-side bills like Meralco, service fees, and other recurring HOA expenses.</p>
         </div>
         <div className="admin-bill-audit-page-actions">
+          <label className="admin-bill-audit-date-filter">
+            <span>From</span>
+            <input
+              type="date"
+              value={coverageStartDate}
+              onChange={(event) => {
+                setCoverageStartDate(event.target.value);
+                setPage(1);
+              }}
+            />
+          </label>
+          <label className="admin-bill-audit-date-filter">
+            <span>To</span>
+            <input
+              type="date"
+              value={coverageEndDate}
+              min={coverageStartDate || undefined}
+              onChange={(event) => {
+                setCoverageEndDate(event.target.value);
+                setPage(1);
+              }}
+            />
+          </label>
           <button
             type="button"
             className="admin-bill-audit-download"
@@ -428,6 +497,14 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
             <div>
               <h3><FileText size={18} /> Recorded Bills</h3>
               <p>All admins with this module can review, edit, and maintain the shared bill tracker.</p>
+            </div>
+            <div className="admin-bill-audit-table-tools">
+              <span className="admin-bill-audit-page-meta">
+                {pageMeta.total > 0
+                  ? `Showing ${pageMeta.start}-${pageMeta.end} of ${pageMeta.total}`
+                  : 'No records to show'}
+              </span>
+              <PaginationControls pagination={pagination} onPageChange={setPage} />
             </div>
           </div>
 

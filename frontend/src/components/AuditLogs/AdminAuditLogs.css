@@ -267,7 +267,7 @@
 
 .admin-audit-filters {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(180px, 1fr) minmax(180px, 1fr);
+  grid-template-columns: minmax(0, 1.5fr) repeat(4, minmax(160px, 1fr));
   gap: 0.85rem;
   padding: 1rem 1.35rem 1.15rem;
 }
@@ -285,13 +285,18 @@
 }
 
 .admin-audit-search input,
-.admin-audit-select select {
+.admin-audit-select select,
+.admin-audit-select input {
   width: 100%;
   border: none;
   background: transparent;
   color: #0f172a;
   font-size: 0.95rem;
   outline: none;
+}
+
+.admin-audit-select-date input {
+  min-height: 22px;
 }
 
 .admin-audit-table-wrap {

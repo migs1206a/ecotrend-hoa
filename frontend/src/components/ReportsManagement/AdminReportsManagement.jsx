@@ -70,6 +70,8 @@ const AdminReportsManagement = ({ token }) => {
   const [downloadId, setDownloadId] = useState('');
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(null);
+  const [coverageStartDate, setCoverageStartDate] = useState('');
+  const [coverageEndDate, setCoverageEndDate] = useState('');
 
   const fetchArchives = useCallback(async () => {
     setLoading(true);
@@ -118,6 +120,11 @@ const AdminReportsManagement = ({ token }) => {
   );
 
   const generateReport = async (reportType) => {
+    if ((coverageStartDate && !coverageEndDate) || (!coverageStartDate && coverageEndDate)) {
+      window.alert('Select both coverage dates before generating a report.');
+      return;
+    }
+
     setGeneratingType(reportType);
     try {
       const response = await fetch(apiUrl('/reports/generate'), {
@@ -126,7 +133,11 @@ const AdminReportsManagement = ({ token }) => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ reportType })
+        body: JSON.stringify({
+          reportType,
+          startDate: coverageStartDate || undefined,
+          endDate: coverageEndDate || undefined
+        })
       });
 
       const data = await response.json();
@@ -140,8 +151,9 @@ const AdminReportsManagement = ({ token }) => {
     } catch (error) {
       console.error('Error generating report:', error);
       window.alert('Failed to generate report');
+    } finally {
+      setGeneratingType('');
     }
-    setGeneratingType('');
   };
 
   const downloadArchive = async (archive) => {
@@ -220,6 +232,27 @@ const AdminReportsManagement = ({ token }) => {
           <div>
             <h3>Generate New Report</h3>
             <p>Each export is saved into the report archive so admins can download and print it again later.</p>
+          </div>
+          <div className="admin-reports-coverage-grid">
+            <label className="admin-reports-coverage-field">
+              <span>Coverage Start</span>
+              <input
+                type="date"
+                className="form-input"
+                value={coverageStartDate}
+                onChange={(event) => setCoverageStartDate(event.target.value)}
+              />
+            </label>
+            <label className="admin-reports-coverage-field">
+              <span>Coverage End</span>
+              <input
+                type="date"
+                className="form-input"
+                value={coverageEndDate}
+                min={coverageStartDate || undefined}
+                onChange={(event) => setCoverageEndDate(event.target.value)}
+              />
+            </label>
           </div>
         </div>
 
@@ -312,6 +345,10 @@ const AdminReportsManagement = ({ token }) => {
                   <div className="admin-reports-meta-box">
                     <strong>Format</strong>
                     <p>{String(archive.format || 'csv').toUpperCase()}</p>
+                  </div>
+                  <div className="admin-reports-meta-box admin-reports-meta-box--wide">
+                    <strong>Coverage</strong>
+                    <p>{archive.notes || 'Coverage: All dates'}</p>
                   </div>
                 </div>
               </article>

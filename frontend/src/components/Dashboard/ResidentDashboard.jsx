@@ -41,6 +41,7 @@ import {
   getVisitorAccessCode
 } from '../../utils/visitorQr';
 import { getVisitorEtaState } from '../../utils/visitEta';
+import { getNextLocalDateTimeInputValue, getNextMinuteDate } from '../../utils/dateTimeInput';
 
 const VISITOR_ID_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png'];
 
@@ -1019,7 +1020,7 @@ const handlePermanentDelete = (vehicleId) => {
       setLoading(false);
       return;
     }
-    if (expectedDate && expectedDate.getTime() < Date.now()) {
+    if (expectedDate && expectedDate.getTime() < getNextMinuteDate().getTime()) {
       showAlert('Expected arrival date and time must be in the future.', 'error');
       setLoading(false);
       return;
@@ -1908,7 +1909,7 @@ const handlePermanentDelete = (vehicleId) => {
                   type="datetime-local"
                   value={visitorForm.expectedDate}
                   onChange={(e) => setVisitorForm({ ...visitorForm, expectedDate: e.target.value })}
-                  min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
+                  min={getNextLocalDateTimeInputValue()}
                   className="form-input vr-datetime-input"
                 />
               </div>

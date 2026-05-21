@@ -64,6 +64,24 @@
   color: var(--gray-500);
 }
 
+.admin-reports-coverage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 0.75rem;
+  width: min(420px, 100%);
+}
+
+.admin-reports-coverage-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.admin-reports-coverage-field span {
+  color: var(--gray-600);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .admin-reports-card-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -181,6 +199,10 @@
   padding: 0.85rem 0.95rem;
 }
 
+.admin-reports-meta-box--wide {
+  grid-column: 1 / -1;
+}
+
 .admin-reports-meta-box strong {
   display: block;
   margin-bottom: 0.3rem;
@@ -204,6 +226,7 @@
 }
 
 @media (max-width: 720px) {
+  .admin-reports-coverage-grid,
   .admin-reports-summary,
   .admin-reports-meta-grid {
     grid-template-columns: 1fr;

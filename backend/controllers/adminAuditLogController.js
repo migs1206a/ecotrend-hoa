@@ -4,10 +4,13 @@ const AdminAuditLog = require('../models/AdminAuditLog');
 const AdminAuditLogArchive = require('../models/AdminAuditLogArchive');
 const { parsePagination, sendPaginatedResponse } = require('../utils/pagination');
 const { buildBrandedReportPdf } = require('../utils/brandedPdf');
+const { buildDateRangeFilter, normalizeDateRange } = require('../utils/dateRange');
 const {
   createAdminAuditLog,
+  extractManageAccountTarget,
   getAuditLogRetentionDays,
-  getAuditModuleLabel
+  getAuditModuleLabel,
+  resolveManageAccountSubject
 } = require('../utils/adminAuditLog');
 const { hasAdminModuleAccess } = require('../utils/adminPermissions');
 
@@ -45,6 +48,23 @@ const formatDateTime = (value) => {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit'
+  });
+};
+
+const formatDateOnly = (value) => {
+  if (!value) {
+    return '';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return date.toLocaleDateString('en-PH', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit'
   });
 };
 
@@ -103,6 +123,7 @@ const buildAdminAuditPdfScope = (query = {}) => {
   const moduleKey = String(query.module || '').trim();
   const eventType = String(query.eventType || '').trim().toLowerCase();
   const search = String(query.q || '').trim();
+  const coverage = normalizeDateRange(query, { label: 'audit log PDF coverage' });
 
   if (moduleKey) {
     parts.push(`filtered to ${getAuditModuleLabel(moduleKey)}`);
@@ -118,6 +139,10 @@ const buildAdminAuditPdfScope = (query = {}) => {
     parts.push(`matching "${search}"`);
   }
 
+  if (coverage.hasRange) {
+    parts.push(`recorded from ${formatDateOnly(coverage.start)} to ${formatDateOnly(coverage.end)}`);
+  }
+
   return `${parts.join(', ')}.`;
 };
 
@@ -130,7 +155,7 @@ const buildAdminAuditPdfRows = (logs = []) =>
     eventType: log.eventType === 'access' ? 'Access' : 'Action',
     action: log.action || '-',
     request: buildRequestSummary(log),
-    details: log.description || '-'
+    details: log.descriptionDisplay || log.description || '-'
   }));
 
 const buildAdminAuditPdf = (logs = [], generatedBy = 'Officer', query = {}) => {
@@ -189,6 +214,11 @@ const buildListFilter = (query = {}) => {
   const moduleKey = String(query.module || '').trim();
   const eventType = String(query.eventType || '').trim().toLowerCase();
   const search = String(query.q || '').trim();
+  const coverage = normalizeDateRange(query, { label: 'audit log coverage' });
+
+  if (coverage.error) {
+    return { error: coverage.error };
+  }
 
   if (moduleKey) {
     filter.moduleKey = moduleKey;
@@ -207,11 +237,62 @@ const buildListFilter = (query = {}) => {
       { 'actor.firstName': regex },
       { 'actor.fullName': regex },
       { 'actor.username': regex },
-      { 'actor.role': regex }
+      { 'actor.role': regex },
+      { 'metadata.subject': regex },
+      { 'metadata.subjectUsername': regex }
     ];
   }
 
-  return filter;
+  Object.assign(filter, buildDateRangeFilter('createdAt', coverage));
+
+  return { filter, coverage };
+};
+
+const buildManageAccountCacheKey = (target = {}) =>
+  target?.targetKey && target?.subjectId ? `${target.targetKey}:${target.subjectId}` : '';
+
+const enrichAuditLogs = async (logs = []) => {
+  const subjectCache = new Map();
+
+  await Promise.all(
+    logs.map(async (log) => {
+      const target = extractManageAccountTarget(log.moduleKey, log.endpoint);
+      const cacheKey = buildManageAccountCacheKey(target);
+
+      if (!cacheKey || subjectCache.has(cacheKey)) {
+        return;
+      }
+
+      const metadataSubjectUsername = String(log.metadata?.subjectUsername || '').trim();
+      if (metadataSubjectUsername) {
+        subjectCache.set(cacheKey, metadataSubjectUsername);
+        return;
+      }
+
+      const resolvedSubject = await resolveManageAccountSubject(target);
+      subjectCache.set(cacheKey, String(resolvedSubject?.subject || '').trim());
+    })
+  );
+
+  return logs.map((log) => {
+    const target = extractManageAccountTarget(log.moduleKey, log.endpoint);
+    const cacheKey = buildManageAccountCacheKey(target);
+    const subjectLabel = cacheKey ? String(subjectCache.get(cacheKey) || '').trim() : '';
+    const rawSubject = String(log.metadata?.subject || log.metadata?.subjectId || '').trim();
+    const description = String(log.description || '').trim();
+    const descriptionDisplay = subjectLabel && rawSubject && description.includes(rawSubject)
+      ? description.split(rawSubject).join(subjectLabel)
+      : description;
+
+    return {
+      ...log,
+      descriptionDisplay,
+      metadata: {
+        ...(log.metadata || {}),
+        ...(subjectLabel ? { subjectUsername: subjectLabel } : {})
+      }
+    };
+  });
 };
 
 const normalizeArchiveWindowDays = (value) => {
@@ -235,7 +316,12 @@ const getArchiveAbsolutePath = (archive = {}) => {
 const listAdminAuditLogs = async (req, res) => {
   try {
     const pagination = parsePagination(req.query);
-    const filter = buildListFilter(req.query);
+    const { filter, error } = buildListFilter(req.query);
+
+    if (error) {
+      return res.status(400).json({ message: error });
+    }
+
     const query = AdminAuditLog.find(filter).sort({ createdAt: -1 }).lean();
 
     if (pagination.enabled) {
@@ -244,10 +330,11 @@ const listAdminAuditLogs = async (req, res) => {
         AdminAuditLog.countDocuments(filter)
       ]);
 
-      return sendPaginatedResponse(res, pagination, logs, total);
+      const enrichedLogs = await enrichAuditLogs(logs);
+      return sendPaginatedResponse(res, pagination, enrichedLogs, total);
     }
 
-    const logs = await query;
+    const logs = await enrichAuditLogs(await query);
     return res.json(logs);
   } catch (error) {
     console.error('listAdminAuditLogs error:', error);
@@ -257,8 +344,13 @@ const listAdminAuditLogs = async (req, res) => {
 
 const downloadAdminAuditLogsPdf = async (req, res) => {
   try {
-    const filter = buildListFilter(req.query);
-    const logs = await AdminAuditLog.find(filter).sort({ createdAt: -1 }).lean();
+    const { filter, error } = buildListFilter(req.query);
+
+    if (error) {
+      return res.status(400).json({ message: error });
+    }
+
+    const logs = await enrichAuditLogs(await AdminAuditLog.find(filter).sort({ createdAt: -1 }).lean());
     const generatedBy = String(req.user?.fullName || req.user?.username || req.user?.role || 'Officer').trim() || 'Officer';
     const { filename, pdfBuffer } = buildAdminAuditPdf(logs, generatedBy, req.query);
 

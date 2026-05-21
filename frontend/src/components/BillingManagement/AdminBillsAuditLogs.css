@@ -8,6 +8,26 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.admin-bill-audit-date-filter {
+  display: grid;
+  gap: 0.3rem;
+  color: var(--gray-600);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.admin-bill-audit-date-filter input {
+  min-height: 44px;
+  padding: 0.72rem 0.85rem;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-lg);
+  background: var(--white);
+  color: var(--gray-900);
+  font: inherit;
 }
 
 .admin-bill-audit-download {
@@ -138,6 +158,23 @@
 .admin-bill-audit-table-head p {
   margin: 0;
   color: var(--gray-500);
+}
+
+.admin-bill-audit-table-tools {
+  display: grid;
+  justify-items: end;
+  gap: 0.6rem;
+}
+
+.admin-bill-audit-page-meta {
+  color: var(--gray-500);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.admin-bill-audit-table-tools .pagination-controls {
+  margin-top: 0;
+  padding-top: 0;
 }
 
 .admin-bill-audit-cancel {
@@ -407,10 +444,19 @@
     align-items: stretch;
   }
 
+  .admin-bill-audit-table-tools {
+    justify-items: stretch;
+  }
+
+  .admin-bill-audit-page-meta {
+    text-align: center;
+  }
+
   .admin-bill-audit-page-actions {
     justify-content: stretch;
   }
 
+  .admin-bill-audit-date-filter,
   .admin-bill-audit-download {
     width: 100%;
   }

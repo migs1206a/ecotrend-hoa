@@ -1,6 +1,7 @@
 const AdminBillAuditLog = require('../models/AdminBillAuditLog');
 const { parsePagination, sendPaginatedResponse } = require('../utils/pagination');
 const { buildBrandedReportPdf } = require('../utils/brandedPdf');
+const { buildDateRangeFilter, normalizeDateRange } = require('../utils/dateRange');
 
 const buildActorSnapshot = (user = {}) => ({
   userId: String(user.userId || user.id || user._id || ''),
@@ -95,6 +96,12 @@ const formatDateForFileName = (value = new Date()) => {
   ].join('');
 };
 
+const formatCoverageLabel = (coverage) => (
+  coverage?.hasRange
+    ? `${formatDateOnly(coverage.start)} to ${formatDateOnly(coverage.end)}`
+    : 'All dates'
+);
+
 const getActorDisplayName = (actor = {}, fallback = 'Officer') =>
   String(actor.fullName || actor.username || fallback).trim() || fallback;
 
@@ -112,7 +119,7 @@ const buildBillAuditReportRows = (logs = []) =>
     notes: log.notes || '-'
   }));
 
-const buildBillAuditPdf = (logs = [], generatedBy = 'ADMIN') => {
+const buildBillAuditPdf = (logs = [], generatedBy = 'ADMIN', coverage = {}) => {
   const rows = buildBillAuditReportRows(logs);
   const paidCount = rows.filter((row) => row.paymentStatus === 'Paid').length;
   const totalAmountValue = rows.reduce((sum, row) => sum + (Number(row.amountValue) || 0), 0);
@@ -127,7 +134,9 @@ const buildBillAuditPdf = (logs = [], generatedBy = 'ADMIN') => {
     generatedOn,
     generatedBy,
     filename,
-    scope: 'All admin-side bill audit log records currently stored in the HOA system.',
+    scope: coverage?.hasRange
+      ? `Admin-side bill audit log records with bill dates from ${formatCoverageLabel(coverage)}.`
+      : 'All admin-side bill audit log records currently stored in the HOA system.',
     columns: [
       { key: 'billName', label: 'Bill Name', width: 118 },
       { key: 'billDate', label: 'Bill Date', width: 74 },
@@ -146,7 +155,8 @@ const buildBillAuditPdf = (logs = [], generatedBy = 'ADMIN') => {
       { label: 'Unpaid Bills', value: String(rows.length - paidCount) },
       { label: 'Total Amount', value: formatCurrency(totalAmountValue) },
       { label: 'Paid Amount', value: formatCurrency(paidAmountValue) },
-      { label: 'Outstanding Amount', value: formatCurrency(Math.max(0, totalAmountValue - paidAmountValue)) }
+      { label: 'Outstanding Amount', value: formatCurrency(Math.max(0, totalAmountValue - paidAmountValue)) },
+      { label: 'Coverage', value: formatCoverageLabel(coverage) }
     ],
     emptyMessage: 'No admin bill audit log records available.',
     pageSize: 'a4',
@@ -162,14 +172,23 @@ const buildBillAuditPdf = (logs = [], generatedBy = 'ADMIN') => {
 const listAdminBillAuditLogs = async (req, res) => {
   try {
     const pagination = parsePagination(req.query);
-    const query = AdminBillAuditLog.find({})
+    const coverage = normalizeDateRange(req.query, { label: 'bill audit log coverage' });
+
+    if (coverage.error) {
+      return res.status(400).json({ message: coverage.error });
+    }
+
+    const filter = {
+      ...buildDateRangeFilter('billDate', coverage)
+    };
+    const query = AdminBillAuditLog.find(filter)
       .sort({ billDate: -1, updatedAt: -1, createdAt: -1 })
       .lean();
 
     if (pagination.enabled) {
       const [logs, total] = await Promise.all([
         query.clone().skip(pagination.skip).limit(pagination.limit),
-        AdminBillAuditLog.countDocuments({})
+        AdminBillAuditLog.countDocuments(filter)
       ]);
 
       return sendPaginatedResponse(res, pagination, logs, total);
@@ -293,7 +312,13 @@ const deleteAdminBillAuditLog = async (req, res) => {
 
 const downloadAdminBillAuditLogsPdf = async (req, res) => {
   try {
-    const logs = await AdminBillAuditLog.find({})
+    const coverage = normalizeDateRange(req.query, { label: 'bill audit log PDF coverage' });
+
+    if (coverage.error) {
+      return res.status(400).json({ message: coverage.error });
+    }
+
+    const logs = await AdminBillAuditLog.find(buildDateRangeFilter('billDate', coverage))
       .sort({ billDate: -1, updatedAt: -1, createdAt: -1 })
       .lean();
 
@@ -304,7 +329,7 @@ const downloadAdminBillAuditLogsPdf = async (req, res) => {
       'ADMIN'
     ).trim() || 'ADMIN';
 
-    const { filename, pdfBuffer } = buildBillAuditPdf(logs, generatedBy);
+    const { filename, pdfBuffer } = buildBillAuditPdf(logs, generatedBy, coverage);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

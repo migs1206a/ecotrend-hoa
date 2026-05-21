@@ -14,6 +14,7 @@ const ReportArchive = require('../models/ReportArchive');
 const { parsePagination, sendPaginatedResponse } = require('../utils/pagination');
 const { storeUploadedFile } = require('../utils/fileStorage');
 const { buildBrandedReportPdf } = require('../utils/brandedPdf');
+const { buildDateRangeFilter, isWithinDateRange, normalizeDateRange } = require('../utils/dateRange');
 
 const isAdminRole = (role) => ['ADMIN', 'MASTER_ADMIN'].includes(role);
 
@@ -81,6 +82,21 @@ const countByValue = (rows, key, expectedValue) => {
 const sumNumber = (rows, key) =>
   rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
 
+const BILLING_MONTH_INDEX = Object.freeze({
+  JANUARY: 0,
+  FEBRUARY: 1,
+  MARCH: 2,
+  APRIL: 3,
+  MAY: 4,
+  JUNE: 5,
+  JULY: 6,
+  AUGUST: 7,
+  SEPTEMBER: 8,
+  OCTOBER: 9,
+  NOVEMBER: 10,
+  DECEMBER: 11
+});
+
 const formatDateForName = (value = new Date()) => {
   const date = new Date(value);
   const pad = (part) => String(part).padStart(2, '0');
@@ -93,6 +109,18 @@ const formatDateForName = (value = new Date()) => {
     pad(date.getSeconds())
   ].join('');
 };
+
+const formatCoverageLabel = (coverage = {}) => (
+  coverage?.hasRange
+    ? `${formatDateOnly(coverage.start)} to ${formatDateOnly(coverage.end)}`
+    : 'All dates'
+);
+
+const buildCoverageScope = (baseScope, coverage = {}, dateLabel = 'record dates') => (
+  coverage?.hasRange
+    ? `${baseScope} Coverage by ${dateLabel}: ${formatCoverageLabel(coverage)}.`
+    : baseScope
+);
 
 const buildStoredReportFile = async (filename, fileBase, pdfContent) => {
   const pdfBuffer = Buffer.from(pdfContent, 'binary');
@@ -175,8 +203,9 @@ const resolveAdminName = async (userId, role) => {
   return admin?.username || role || 'ADMIN';
 };
 
-const buildResidentsReport = async () => {
-  const residents = await User.find({ isApproved: true, deletedAt: null }).lean();
+const buildResidentsReport = async (coverage = {}) => {
+  const residents = (await User.find({ isApproved: true, deletedAt: null }).lean())
+    .filter((resident) => isWithinDateRange(resident.createdAt, coverage));
   const headers = [
     'residentName',
     'username',
@@ -206,7 +235,11 @@ const buildResidentsReport = async () => {
 
   return {
     title: 'Residents Report',
-    scope: 'Approved resident accounts currently registered in the HOA system.',
+    scope: buildCoverageScope(
+      'Approved resident accounts currently registered in the HOA system.',
+      coverage,
+      'join dates'
+    ),
     headers,
     columns: [
       { key: 'residentName', label: 'Resident / Family', width: 130 },
@@ -223,13 +256,15 @@ const buildResidentsReport = async () => {
       { label: 'Approved Residents', value: String(rows.length) },
       { label: 'Family Members', value: String(totalFamilyMembers) },
       { label: 'Registered Vehicles', value: String(totalVehicles) },
-      { label: 'Streets Covered', value: String(streetsCovered) }
+      { label: 'Streets Covered', value: String(streetsCovered) },
+      { label: 'Coverage', value: formatCoverageLabel(coverage) }
     ]
   };
 };
 
-const buildVisitorsReport = async () => {
-  const visitors = await Visitor.find({}).sort({ createdAt: -1 }).lean();
+const buildVisitorsReport = async (coverage = {}) => {
+  const visitors = (await Visitor.find({}).sort({ createdAt: -1 }).lean())
+    .filter((visitor) => isWithinDateRange(visitor.entryTime || visitor.expectedDate || visitor.createdAt, coverage));
   const headers = [
     'visitorName',
     'purpose',
@@ -264,7 +299,11 @@ const buildVisitorsReport = async () => {
 
   return {
     title: 'Visitors Report',
-    scope: 'All visitor records, including scheduled, active, and completed visits.',
+    scope: buildCoverageScope(
+      'All visitor records, including scheduled, active, and completed visits.',
+      coverage,
+      'visit dates'
+    ),
     headers,
     columns: [
       { key: 'visitorName', label: 'Visitor', width: 115 },
@@ -282,12 +321,13 @@ const buildVisitorsReport = async () => {
       { label: 'Visitor Records', value: String(rows.length) },
       { label: 'With Entry Time', value: String(enteredCount) },
       { label: 'With Exit Time', value: String(exitedCount) },
-      { label: 'Open Visits', value: String(Math.max(0, enteredCount - exitedCount)) }
+      { label: 'Open Visits', value: String(Math.max(0, enteredCount - exitedCount)) },
+      { label: 'Coverage', value: formatCoverageLabel(coverage) }
     ]
   };
 };
 
-const buildBillingReport = async () => {
+const buildBillingReport = async (coverage = {}) => {
   const billings = await Billing.find({})
     .populate('residentId', 'familyName username houseAddress street phoneNumber')
     .lean();
@@ -312,6 +352,15 @@ const buildBillingReport = async () => {
   billings.forEach((billing) => {
     const resident = billing.residentId || {};
     Object.entries(billing.months || {}).forEach(([month, monthRecord]) => {
+      const monthIndex = BILLING_MONTH_INDEX[String(month || '').toUpperCase()];
+      const billingLineDate = Number.isInteger(monthIndex)
+        ? new Date(Number(billing.year) || 0, monthIndex, 1)
+        : null;
+
+      if (!isWithinDateRange(billingLineDate, coverage)) {
+        return;
+      }
+
       const monthlyDue = Number(billing.monthlyDue) || 0;
       rows.push({
         residentName: resident.familyName || '',
@@ -338,7 +387,11 @@ const buildBillingReport = async () => {
 
   return {
     title: 'Billing Report',
-    scope: 'Monthly HOA dues generated from all resident billing records.',
+    scope: buildCoverageScope(
+      'Monthly HOA dues generated from all resident billing records.',
+      coverage,
+      'bill dates'
+    ),
     headers,
     columns: [
       { key: 'residentName', label: 'Resident', width: 115 },
@@ -360,13 +413,14 @@ const buildBillingReport = async () => {
       { label: 'Unpaid Lines', value: String(rows.length - paidCount) },
       { label: 'Expected Amount', value: formatCurrency(totalExpected) },
       { label: 'Collected Amount', value: formatCurrency(totalCollected) },
-      { label: 'Outstanding', value: formatCurrency(Math.max(0, totalExpected - totalCollected)) }
+      { label: 'Outstanding', value: formatCurrency(Math.max(0, totalExpected - totalCollected)) },
+      { label: 'Coverage', value: formatCoverageLabel(coverage) }
     ]
   };
 };
 
-const buildEntryLogsReport = async () => {
-  const entryLogs = await EntryLog.find({})
+const buildEntryLogsReport = async (coverage = {}) => {
+  const entryLogs = await EntryLog.find(buildDateRangeFilter('timestamp', coverage))
     .populate('guardOnDuty', 'username fullName')
     .populate('residentId', 'familyName houseAddress street phoneNumber')
     .sort({ timestamp: -1 })
@@ -406,7 +460,11 @@ const buildEntryLogsReport = async () => {
 
   return {
     title: 'Entry and Exit Logs Report',
-    scope: 'Security gate entry and exit records sorted from newest to oldest.',
+    scope: buildCoverageScope(
+      'Security gate entry and exit records sorted from newest to oldest.',
+      coverage,
+      'log dates'
+    ),
     headers,
     columns: [
       { key: 'timestamp', label: 'Timestamp', width: 95 },
@@ -425,13 +483,14 @@ const buildEntryLogsReport = async () => {
       { label: 'Total Logs', value: String(rows.length) },
       { label: 'Entry Logs', value: String(entryCount) },
       { label: 'Exit Logs', value: String(exitCount) },
-      { label: 'Unclassified Logs', value: String(Math.max(0, rows.length - entryCount - exitCount)) }
+      { label: 'Unclassified Logs', value: String(Math.max(0, rows.length - entryCount - exitCount)) },
+      { label: 'Coverage', value: formatCoverageLabel(coverage) }
     ]
   };
 };
 
-const buildComplaintsReport = async () => {
-  const complaints = await Complaint.find({}).sort({ createdAt: -1 }).lean();
+const buildComplaintsReport = async (coverage = {}) => {
+  const complaints = await Complaint.find(buildDateRangeFilter('createdAt', coverage)).sort({ createdAt: -1 }).lean();
   const headers = [
     'complaintType',
     'category',
@@ -474,7 +533,11 @@ const buildComplaintsReport = async () => {
 
   return {
     title: 'Complaints Report',
-    scope: 'Resident complaint records, statuses, response indicators, and supporting evidence flags.',
+    scope: buildCoverageScope(
+      'Resident complaint records, statuses, response indicators, and supporting evidence flags.',
+      coverage,
+      'submission dates'
+    ),
     headers,
     columns: [
       { key: 'submittedAt', label: 'Submitted', width: 92 },
@@ -496,13 +559,14 @@ const buildComplaintsReport = async () => {
       { label: 'Resolved', value: String(resolvedCount) },
       { label: 'High Urgency', value: String(highUrgencyCount) },
       { label: 'With Evidence', value: String(rows.filter((row) => row.hasPhoto === 'Yes').length) },
-      { label: 'Archived', value: String(archivedCount) }
+      { label: 'Archived', value: String(archivedCount) },
+      { label: 'Coverage', value: formatCoverageLabel(coverage) }
     ]
   };
 };
 
-const buildFacilitiesReport = async () => {
-  const reservations = await FacilityReservation.find({})
+const buildFacilitiesReport = async (coverage = {}) => {
+  const reservations = await FacilityReservation.find(buildDateRangeFilter('dateReserved', coverage))
     .sort({ createdAt: -1 })
     .lean();
 
@@ -558,7 +622,11 @@ const buildFacilitiesReport = async () => {
 
   return {
     title: 'Facility Reservations Report',
-    scope: 'All facility reservation requests, payment status, approval details, and event schedules.',
+    scope: buildCoverageScope(
+      'All facility reservation requests, payment status, approval details, and event schedules.',
+      coverage,
+      'reservation dates'
+    ),
     headers,
     columns: [
       { key: 'facilityName', label: 'Facility', width: 88 },
@@ -581,7 +649,8 @@ const buildFacilitiesReport = async () => {
       { label: 'Pending', value: String(pendingCount) },
       { label: 'Paid', value: String(paidCount) },
       { label: 'Total Guests', value: String(sumNumber(rows, 'numberOfGuests')) },
-      { label: 'Total Amount', value: formatCurrency(sumNumber(rows, 'totalAmountValue')) }
+      { label: 'Total Amount', value: formatCurrency(sumNumber(rows, 'totalAmountValue')) },
+      { label: 'Coverage', value: formatCoverageLabel(coverage) }
     ]
   };
 };
@@ -635,10 +704,18 @@ exports.generateReport = async (req, res) => {
       return res.status(400).json({ message: 'Invalid report type' });
     }
 
+    const coverage = normalizeDateRange(req.body, { label: 'report coverage' });
+    if (coverage.error) {
+      return res.status(400).json({ message: coverage.error });
+    }
+
     const generatedOn = new Date();
-    const reportData = await buildReport();
+    const reportData = await buildReport(coverage);
     const timestamp = formatDateForName(generatedOn);
-    const fileBase = `${reportType}-report-${timestamp}`;
+    const coverageTag = coverage.hasRange
+      ? `${coverage.start.toISOString().slice(0, 10)}_to_${coverage.end.toISOString().slice(0, 10)}`
+      : 'all-dates';
+    const fileBase = `${reportType}-report-${coverageTag}-${timestamp}`;
     const filename = `${fileBase}.pdf`;
 
     const generatedByName = await resolveAdminName(req.user?.userId, req.user?.role);
@@ -653,7 +730,8 @@ exports.generateReport = async (req, res) => {
       file: storedReportFile,
       recordCount: reportData.rows.length,
       generatedByRole: req.user?.role || 'ADMIN',
-      generatedByName
+      generatedByName,
+      notes: `Coverage: ${formatCoverageLabel(coverage)}`
     });
 
     res.status(201).json({
