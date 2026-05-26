@@ -104,6 +104,7 @@ const adminRoutes = require('./routes/admin');
 const guardRoutes = require('./routes/guards');
 const deliveryRoutes = require('./routes/deliveries');
 const announcementRoutes = require('./routes/announcements');
+const notificationRoutes = require('./routes/notifications');
 const visitorRoutes = require('./routes/visitors');
 const entryLogRoutes = require('./routes/entryLogs');
 const masterAdminRoutes = require('./routes/masterAdmin');
@@ -116,6 +117,7 @@ app.use('/api/admin', adminRoutes);         // Admin: /api/admin/create, /api/ad
 app.use('/api/guards', guardRoutes);        // Guards: /api/guards/, /api/guards/create
 app.use('/api/deliveries', deliveryRoutes); // Deliveries: /api/deliveries/, /api/deliveries/create
 app.use('/api/announcements', announcementRoutes); // Announcements: /api/announcements
+app.use('/api/notifications', notificationRoutes); // Mobile notification inbox and push devices
 app.use('/api/billing', require('./routes/billing'));
 app.use('/api/visitors', visitorRoutes);
 app.use('/api/entry-logs', entryLogRoutes);

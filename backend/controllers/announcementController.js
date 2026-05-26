@@ -1,5 +1,9 @@
 const Announcement = require('../models/Announcement');
 const { parsePagination, sendPaginatedResponse } = require('../utils/pagination');
+const {
+  notifyAnnouncementCreated,
+  notifyAnnouncementUpdated
+} = require('../utils/notificationService');
 
 // Get all announcements
 const getAnnouncements = async (req, res) => {
@@ -79,6 +83,9 @@ const createAnnouncement = async (req, res) => {
     });
 
     const savedAnnouncement = await announcement.save();
+    notifyAnnouncementCreated(savedAnnouncement).catch((notificationError) => {
+      console.error('Failed to publish announcement notification:', notificationError);
+    });
     res.status(201).json(savedAnnouncement);
   } catch (error) {
     console.error('Error creating announcement:', error);
@@ -114,6 +121,9 @@ const updateAnnouncement = async (req, res) => {
       return res.status(404).json({ message: 'Announcement not found' });
     }
 
+    notifyAnnouncementUpdated(announcement).catch((notificationError) => {
+      console.error('Failed to publish announcement update notification:', notificationError);
+    });
     res.json(announcement);
   } catch (error) {
     console.error('Error updating announcement:', error);
