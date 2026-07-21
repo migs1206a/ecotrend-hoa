@@ -24,6 +24,7 @@ import {
   X
 } from 'lucide-react';
 import './AdminBillingManagement.css';
+import FileViewerModal from '../common/FileViewerModal';
 import {
   IMAGE_UPLOAD_MAX_BYTES,
   formatFileSize,
@@ -1318,31 +1319,26 @@ const AdminBillingManagement = ({ token, showConfirm }) => {
       </div>
 
       {viewingReceipt && (
-        <div className="billing-receipt-modal" onClick={() => setViewingReceipt(null)}>
-          <div className="billing-receipt-card" onClick={(event) => event.stopPropagation()}>
-            <div className="billing-receipt-card-head">
-              <h3>{formatMonthLabel(viewingReceipt.month)} Receipt</h3>
-              <button onClick={() => setViewingReceipt(null)}><X size={16} /></button>
-            </div>
-            {viewingReceipt.receipt.mimetype === 'application/pdf' ? (
-              <iframe title="Billing receipt preview" src={assetUrl(viewingReceipt.receipt.path)} className="billing-receipt-frame" />
-            ) : (
-              <img src={assetUrl(viewingReceipt.receipt.path)} alt="Billing receipt" className="billing-receipt-image" />
-            )}
-          </div>
-        </div>
+        <FileViewerModal
+          title={`${formatMonthLabel(viewingReceipt.month)} Receipt`}
+          subtitle={viewingReceipt.receipt.originalName || 'Billing receipt'}
+          fileUrl={assetUrl(viewingReceipt.receipt.path)}
+          downloadUrl={assetUrl(viewingReceipt.receipt.path)}
+          downloadName={viewingReceipt.receipt.originalName || `${formatMonthLabel(viewingReceipt.month)}-receipt`}
+          isPdf={viewingReceipt.receipt.mimetype === 'application/pdf'}
+          onClose={() => setViewingReceipt(null)}
+        />
       )}
 
       {viewingQr && settings?.gcashQr?.path && (
-        <div className="billing-receipt-modal" onClick={() => setViewingQr(false)}>
-          <div className="billing-receipt-card" onClick={(event) => event.stopPropagation()}>
-            <div className="billing-receipt-card-head">
-              <h3>HOA GCash QR Code</h3>
-              <button onClick={() => setViewingQr(false)}><X size={16} /></button>
-            </div>
-            <img src={assetUrl(settings.gcashQr.path)} alt="HOA GCash QR" className="billing-receipt-image" />
-          </div>
-        </div>
+        <FileViewerModal
+          title="HOA GCash QR Code"
+          subtitle={settings.gcashQr.originalName || 'Payment QR code'}
+          fileUrl={assetUrl(settings.gcashQr.path)}
+          downloadUrl={assetUrl(settings.gcashQr.path)}
+          downloadName={settings.gcashQr.originalName || 'hoa-gcash-qr'}
+          onClose={() => setViewingQr(false)}
+        />
       )}
     </div>
   );

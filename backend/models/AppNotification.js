@@ -18,7 +18,7 @@ const appNotificationSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
-      maxlength: 500
+      maxlength: 1000
     },
     targetRoles: {
       type: [String],
@@ -34,15 +34,13 @@ const appNotificationSchema = new mongoose.Schema(
     },
     entityType: {
       type: String,
-      default: '',
       trim: true,
-      maxlength: 80
+      default: ''
     },
     entityId: {
       type: String,
-      default: '',
       trim: true,
-      maxlength: 120
+      default: ''
     },
     metadata: {
       type: mongoose.Schema.Types.Mixed,

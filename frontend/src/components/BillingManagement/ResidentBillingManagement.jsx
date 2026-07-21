@@ -5,6 +5,7 @@ import {
   Eye, ChevronLeft, ChevronRight, XCircle
 } from 'lucide-react';
 import './ResidentBillingManagement.css';
+import FileViewerModal from '../common/FileViewerModal';
 import {
   DOCUMENT_UPLOAD_MAX_BYTES,
   formatFileSize,
@@ -360,31 +361,26 @@ const ResidentBillingManagement = ({ token, userId, showAlert }) => {
       )}
 
       {viewingReceipt && (
-        <div className="resident-billing-modal" onClick={() => setViewingReceipt(null)}>
-          <div className="resident-billing-modal-card" onClick={(event) => event.stopPropagation()}>
-            <div className="resident-billing-modal-head">
-              <h3>{viewingReceipt.label} Receipt</h3>
-              <button onClick={() => setViewingReceipt(null)}><XCircle size={16} /></button>
-            </div>
-            {viewingReceipt.record.receipt.mimetype === 'application/pdf' ? (
-              <iframe title="Resident billing receipt" src={assetUrl(viewingReceipt.record.receipt.path)} className="resident-billing-frame" />
-            ) : (
-              <img src={assetUrl(viewingReceipt.record.receipt.path)} alt="Resident receipt" className="resident-billing-image" />
-            )}
-          </div>
-        </div>
+        <FileViewerModal
+          title={`${viewingReceipt.label} Receipt`}
+          subtitle={viewingReceipt.record.receipt.originalName || 'Resident receipt'}
+          fileUrl={assetUrl(viewingReceipt.record.receipt.path)}
+          downloadUrl={assetUrl(viewingReceipt.record.receipt.path)}
+          downloadName={viewingReceipt.record.receipt.originalName || `${viewingReceipt.label}-receipt`}
+          isPdf={viewingReceipt.record.receipt.mimetype === 'application/pdf'}
+          onClose={() => setViewingReceipt(null)}
+        />
       )}
 
       {viewingQr && settings?.gcashQr?.path && (
-        <div className="resident-billing-modal" onClick={() => setViewingQr(false)}>
-          <div className="resident-billing-modal-card" onClick={(event) => event.stopPropagation()}>
-            <div className="resident-billing-modal-head">
-              <h3>HOA GCash QR Code</h3>
-              <button onClick={() => setViewingQr(false)}><XCircle size={16} /></button>
-            </div>
-            <img src={assetUrl(settings.gcashQr.path)} alt="HOA GCash QR" className="resident-billing-image" />
-          </div>
-        </div>
+        <FileViewerModal
+          title="HOA GCash QR Code"
+          subtitle={settings.gcashQr.originalName || 'Payment QR code'}
+          fileUrl={assetUrl(settings.gcashQr.path)}
+          downloadUrl={assetUrl(settings.gcashQr.path)}
+          downloadName={settings.gcashQr.originalName || 'hoa-gcash-qr'}
+          onClose={() => setViewingQr(false)}
+        />
       )}
     </div>
   );

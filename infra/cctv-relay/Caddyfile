@@ -1,0 +1,9 @@
+{$PRIMARY_WEBRTC_DOMAIN} {
+  encode zstd gzip
+  reverse_proxy mediamtx:8889
+}
+
+{$PRIMARY_HLS_DOMAIN} {
+  encode zstd gzip
+  reverse_proxy mediamtx:8888
+}

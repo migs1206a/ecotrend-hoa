@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiUrl, assetUrl } from '../../utils/api';
-import { Download, Eye, FileText, LayoutGrid, Search, Table2, XCircle } from 'lucide-react';
+import { Download, Eye, FileText, LayoutGrid, Search, Table2 } from 'lucide-react';
 import PaginationControls from '../common/PaginationControls';
 import { buildPaginatedUrl, parsePaginatedResponse } from '../../utils/pagination';
+import FileViewerModal from '../common/FileViewerModal';
 import './AdminDocumentsManagement.css';
 
 const statusMap = {
@@ -352,19 +353,15 @@ const AdminDocumentsManagement = ({ token }) => {
       <PaginationControls pagination={pagination} onPageChange={setPage} />
 
       {previewFile && (
-        <div className="billing-receipt-modal" onClick={() => setPreviewFile(null)}>
-          <div className="billing-receipt-card" onClick={(event) => event.stopPropagation()}>
-            <div className="billing-receipt-card-head">
-              <h3>{previewFile.originalName || 'Resident Document'}</h3>
-              <button onClick={() => setPreviewFile(null)}><XCircle size={16} /></button>
-            </div>
-            {previewFile.mimetype === 'application/pdf' ? (
-              <iframe title="Resident Upload" src={assetUrl(previewFile.path)} className="admin-doc-preview-frame" />
-            ) : (
-              <img src={assetUrl(previewFile.path)} alt="Resident Upload" className="billing-receipt-image" />
-            )}
-          </div>
-        </div>
+        <FileViewerModal
+          title="Resident Document"
+          subtitle={previewFile.originalName || 'Resident upload'}
+          fileUrl={assetUrl(previewFile.path)}
+          downloadUrl={assetUrl(previewFile.path)}
+          downloadName={previewFile.originalName || 'resident-document'}
+          isPdf={previewFile.mimetype === 'application/pdf'}
+          onClose={() => setPreviewFile(null)}
+        />
       )}
     </div>
   );

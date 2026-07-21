@@ -62,7 +62,7 @@ router.get(
 router.post(
   '/pre-register',
   requireRoles('RESIDENT'),
-  identificationUpload.single('identificationFile'),
+  identificationUpload.any(),
   visitorController.preRegisterVisitor
 );
 

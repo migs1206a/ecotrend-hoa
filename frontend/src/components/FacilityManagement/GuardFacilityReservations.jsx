@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   Calendar,
@@ -24,6 +24,7 @@ import {
   getFacilityGuestQrAccessCode,
   getFacilityGuestQrMeta
 } from './facilityGuestQr';
+import useHtml5QrScanner from '../../hooks/useHtml5QrScanner';
 
 const formatDateTime = (value) => new Date(value).toLocaleString();
 const FACILITY_QR_CHECKPOINT_OPTIONS = [
@@ -41,10 +42,6 @@ const GuardFacilityReservations = ({ token }) => {
   const [viewMode, setViewMode] = useState('card');
   const [qrCheckpoint, setQrCheckpoint] = useState('gate_entry');
   const [qrTokenInput, setQrTokenInput] = useState('');
-  const [qrScannerActive, setQrScannerActive] = useState(false);
-  const qrVideoRef = useRef(null);
-  const qrStreamRef = useRef(null);
-  const qrScanIntervalRef = useRef(null);
 
   useEffect(() => {
     setPage(1);
@@ -77,28 +74,12 @@ const GuardFacilityReservations = ({ token }) => {
     setLoading(false);
   }, [page, searchQuery, statusFilter, token]);
 
-  const stopQrScanner = useCallback(() => {
-    if (qrScanIntervalRef.current) {
-      clearInterval(qrScanIntervalRef.current);
-      qrScanIntervalRef.current = null;
-    }
-
-    if (qrStreamRef.current) {
-      qrStreamRef.current.getTracks().forEach((track) => track.stop());
-      qrStreamRef.current = null;
-    }
-
-    setQrScannerActive(false);
-  }, []);
-
-  useEffect(() => stopQrScanner, [stopQrScanner]);
-
   const submitQrScan = useCallback(async (rawValue) => {
     const qrToken = extractFacilityGuestQrToken(rawValue);
 
     if (!qrToken) {
       window.alert('Please scan a valid facility guest QR pass or enter the guest code.');
-      return;
+      return false;
     }
 
     try {
@@ -114,60 +95,33 @@ const GuardFacilityReservations = ({ token }) => {
 
       if (!response.ok) {
         window.alert(data.message || 'Failed to record the facility guest checkpoint.');
-        return;
+        return false;
       }
 
       window.alert(data.message || 'Facility guest checkpoint recorded.');
       setQrTokenInput('');
-      stopQrScanner();
       fetchReservations();
+      return true;
     } catch (error) {
       console.error('Error scanning facility guest QR:', error);
       window.alert('Failed to record the facility guest checkpoint.');
+      return false;
     }
-  }, [fetchReservations, qrCheckpoint, stopQrScanner, token]);
+  }, [fetchReservations, qrCheckpoint, token]);
 
-  const startQrScanner = useCallback(async () => {
-    if (!('BarcodeDetector' in window)) {
-      window.alert('QR scanning is not supported by this browser. Use the guest code field instead.');
-      return;
+  const {
+    scannerActive: qrScannerActive,
+    scannerStarting,
+    startScanner: startQrScanner,
+    stopScanner: stopQrScanner
+  } = useHtml5QrScanner({
+    containerId: 'guard-facility-qr-scanner',
+    onScanSuccess: submitQrScan,
+    onStartError: (message) => {
+      console.error('Error starting facility QR scanner:', message);
+      window.alert(message || 'Unable to open camera for facility QR scanning.');
     }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }
-      });
-      qrStreamRef.current = stream;
-      setQrScannerActive(true);
-
-      setTimeout(() => {
-        if (qrVideoRef.current) {
-          qrVideoRef.current.srcObject = stream;
-          qrVideoRef.current.play().catch(() => {});
-        }
-      }, 0);
-
-      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-      qrScanIntervalRef.current = setInterval(async () => {
-        const video = qrVideoRef.current;
-        if (!video || video.readyState < 2) return;
-
-        try {
-          const codes = await detector.detect(video);
-          const firstCode = codes[0]?.rawValue;
-          if (firstCode) {
-            await submitQrScan(firstCode);
-          }
-        } catch (error) {
-          console.error('Facility QR scan error:', error);
-        }
-      }, 900);
-    } catch (error) {
-      console.error('Error starting facility QR scanner:', error);
-      window.alert('Unable to open camera for facility QR scanning.');
-      stopQrScanner();
-    }
-  }, [stopQrScanner, submitQrScan]);
+  });
 
   const loadGuestCodeIntoScanner = (reservation) => {
     const accessCode = getFacilityGuestQrAccessCode(reservation);
@@ -300,8 +254,13 @@ const GuardFacilityReservations = ({ token }) => {
           </select>
         </div>
         <div className="guard-facility-qr-controls">
-          <button type="button" className="guard-facility-qr-btn primary" onClick={qrScannerActive ? stopQrScanner : startQrScanner}>
-            <ScanLine size={16} />{qrScannerActive ? 'Stop Scanner' : 'Scan QR'}
+          <button
+            type="button"
+            className="guard-facility-qr-btn primary"
+            onClick={qrScannerActive ? stopQrScanner : startQrScanner}
+            disabled={scannerStarting}
+          >
+            <ScanLine size={16} />{scannerStarting ? 'Starting...' : (qrScannerActive ? 'Stop Scanner' : 'Scan QR')}
           </button>
           <input
             type="text"
@@ -310,11 +269,24 @@ const GuardFacilityReservations = ({ token }) => {
             placeholder="Facility guest code or QR token"
             className="form-input"
           />
-          <button type="button" className="guard-facility-qr-btn" onClick={() => submitQrScan(qrTokenInput)}>
+          <button
+            type="button"
+            className="guard-facility-qr-btn"
+            onClick={async () => {
+              const recorded = await submitQrScan(qrTokenInput);
+              if (recorded) {
+                stopQrScanner();
+              }
+            }}
+          >
             <CheckCircle2 size={16} />Record
           </button>
         </div>
-        {qrScannerActive && <video ref={qrVideoRef} className="guard-facility-qr-video" muted playsInline />}
+        <div
+          id="guard-facility-qr-scanner"
+          className={`guard-facility-qr-video guard-facility-qr-reader${qrScannerActive ? ' active' : ''}`}
+          aria-hidden={!qrScannerActive}
+        />
       </div>
 
       <div className="guard-facility-toolbar">

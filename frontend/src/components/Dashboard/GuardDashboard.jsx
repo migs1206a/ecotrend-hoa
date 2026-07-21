@@ -1,15 +1,16 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import ecohoa from '../../assets/ecohoa.png';
 import { apiUrl } from '../../utils/api';
-import { 
-  Home, LogOut, Search, UserCheck, Car, Clock, 
+import {
+  Home, LogOut, Search, UserCheck, Car, Clock,
   Menu, X, ChevronRight, AlertCircle, CheckCircle,
-  LogIn, LogOut as LogOutIcon, User, Phone, MapPin, Package, 
-  Calendar, MessageSquare, Bell, Landmark, Camera, Map as MapIcon, Eye, QrCode, ScanLine, Users, LayoutGrid, Table2, Download
+  LogIn, LogOut as LogOutIcon, User, Phone, MapPin, Package,
+  Calendar, MessageSquare, Bell, Landmark, Camera, Map as MapIcon, Eye, QrCode, Users, LayoutGrid, Table2, Download
 } from 'lucide-react';
 import './GuardDashboard.css';
 import GuardAnnouncement from '../AnnouncementManagement/GuardAnnouncement';
 import GuardFacilityReservations from '../FacilityManagement/GuardFacilityReservations';
+import GuardVisitorQrPanel from './GuardVisitorQrPanel';
 import CCTVFeedsModule from '../CCTV/CCTVFeedsModule';
 import SubdivisionMap3D from '../SubdivisionMap/SubdivisionMap3D';
 import VisitorIdentificationModal from '../common/VisitorIdentificationModal';
@@ -23,16 +24,10 @@ import {
   validatePhoneNumberValue
 } from '../../utils/formSecurity';
 import {
-  extractVisitorQrCredential,
   formatVisitorAccessCode,
   getVisitorAccessCode,
   isQrManagedVisitor
 } from '../../utils/visitorQr';
-
-const QR_CHECKPOINT_OPTIONS = [
-  { value: 'gate_entry', label: 'Gate Entrance' },
-  { value: 'gate_exit', label: 'Gate Exit' }
-];
 const getCheckpointProgress = (visitor, checkpoint) => {
   const checkpoints = Array.isArray(visitor?.qrCheckpoints) ? visitor.qrCheckpoints : [];
   const matching = checkpoints.filter((item) => item.checkpoint === checkpoint);
@@ -47,12 +42,7 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const [searchType, setSearchType] = useState('resident');
   const [searchResults, setSearchResults] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [qrCheckpoint, setQrCheckpoint] = useState('gate_entry');
-  const [qrTokenInput, setQrTokenInput] = useState('');
-  const [qrScannerActive, setQrScannerActive] = useState(false);
-  const qrVideoRef = useRef(null);
-  const qrStreamRef = useRef(null);
-  const qrScanIntervalRef = useRef(null);
+  const [visitorScannerCodeRequest, setVisitorScannerCodeRequest] = useState(null);
   
   const [residents, setResidents] = useState([]);
   const [residentSearchQuery, setResidentSearchQuery] = useState('');
@@ -147,109 +137,19 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
     }
   }, [onLogout, token]);
 
-  const stopQrScanner = useCallback(() => {
-    if (qrScanIntervalRef.current) {
-      clearInterval(qrScanIntervalRef.current);
-      qrScanIntervalRef.current = null;
-    }
-
-    if (qrStreamRef.current) {
-      qrStreamRef.current.getTracks().forEach((track) => track.stop());
-      qrStreamRef.current = null;
-    }
-
-    setQrScannerActive(false);
-  }, []);
-
-  useEffect(() => stopQrScanner, [stopQrScanner]);
-
-  const submitQrScan = async (rawValue) => {
-    const qrToken = extractVisitorQrCredential(rawValue);
-
-    if (!qrToken) {
-      showAlert('Please scan a valid QR pass or enter the short visitor code.', 'error');
-      return;
-    }
-
-    try {
-      const response = await fetch(apiUrl('/visitors/qr/scan'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ qrToken, checkpoint: qrCheckpoint })
-      });
-      const data = await response.json();
-
-      if (!response.ok) {
-        showAlert(data.message || 'Failed to record QR checkpoint.', 'error');
-        return;
-      }
-
-      showAlert(data.message || 'QR checkpoint recorded.', 'success');
-      setQrTokenInput('');
-      stopQrScanner();
-      fetchPreRegisteredVisitors();
-      fetchActiveVisitors();
-      fetchStats();
-      fetchRecentActivity();
-    } catch (error) {
-      showAlert('Failed to record QR checkpoint.', 'error');
-    }
-  };
-
-  const startQrScanner = async () => {
-    if (!('BarcodeDetector' in window)) {
-      showAlert('QR scanning is not supported by this browser. Use the visitor code or QR token in the manual field instead.', 'error');
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }
-      });
-      qrStreamRef.current = stream;
-      setQrScannerActive(true);
-
-      setTimeout(() => {
-        if (qrVideoRef.current) {
-          qrVideoRef.current.srcObject = stream;
-          qrVideoRef.current.play().catch(() => {});
-        }
-      }, 0);
-
-      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-      qrScanIntervalRef.current = setInterval(async () => {
-        const video = qrVideoRef.current;
-        if (!video || video.readyState < 2) return;
-
-        try {
-          const codes = await detector.detect(video);
-          const firstCode = codes[0]?.rawValue;
-          if (firstCode) {
-            await submitQrScan(firstCode);
-          }
-        } catch (error) {
-          console.error('QR scan error:', error);
-        }
-      }, 900);
-    } catch (error) {
-      showAlert('Unable to open camera for QR scanning.', 'error');
-      stopQrScanner();
-    }
-  };
-
   const loadVisitorCodeIntoScanner = (visitor) => {
     const accessCode = getVisitorAccessCode(visitor);
 
     if (!accessCode) {
-      showAlert('No visitor code is available for this pass yet.', 'error');
+      window.alert('No visitor code is available for this pass yet.');
       return;
     }
 
-    setQrTokenInput(accessCode);
-    showAlert('Visitor code loaded into the manual QR field.', 'success');
+    setVisitorScannerCodeRequest({
+      code: accessCode,
+      nonce: Date.now()
+    });
+    window.alert('Visitor code loaded into the manual QR field.');
   };
 
   useEffect(() => {
@@ -428,6 +328,15 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
       setPreRegisteredVisitors(Array.isArray(data) ? data : []);
     } catch (error) { console.error('Error fetching pre-registered visitors:', error); setPreRegisteredVisitors([]); }
   }, [token]);
+
+  const handleVisitorQrRecorded = useCallback(() => {
+    fetchPreRegisteredVisitors();
+    fetchActiveVisitors();
+    window.setTimeout(() => {
+      fetchStats();
+      fetchRecentActivity();
+    }, 0);
+  }, [fetchActiveVisitors, fetchPreRegisteredVisitors, fetchRecentActivity, fetchStats]);
 
   useEffect(() => {
     if (!hasModuleAccess(permissionUser, 'overview')) {
@@ -886,35 +795,11 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
           <input type="text" value={preRegSearchQuery} onChange={(e) => setPreRegSearchQuery(e.target.value)} placeholder="Search by name, host, or plate number..." className="search-input" style={{ paddingLeft: '3rem' }} />
         </div>
 
-        <div className="guard-qr-panel">
-          <div className="guard-qr-panel-head">
-            <div>
-              <h3><QrCode size={18} /> QR Checkpoint Scanner</h3>
-              <p>Select a gate checkpoint, then scan the QR or enter the short visitor code manually when camera access is unavailable.</p>
-            </div>
-            <select value={qrCheckpoint} onChange={(e) => setQrCheckpoint(e.target.value)} className="form-input">
-              {QR_CHECKPOINT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </div>
-          <div className="guard-qr-controls">
-            <button type="button" className="btn-approve" onClick={qrScannerActive ? stopQrScanner : startQrScanner}>
-              <ScanLine size={16} />{qrScannerActive ? 'Stop Scanner' : 'Scan QR'}
-            </button>
-            <input
-              type="text"
-              value={qrTokenInput}
-              onChange={(e) => setQrTokenInput(e.target.value)}
-              placeholder="Short visitor code or QR token"
-              className="form-input"
-            />
-            <button type="button" className="btn-approve" onClick={() => submitQrScan(qrTokenInput)}>
-              <CheckCircle size={16} />Record
-            </button>
-          </div>
-          {qrScannerActive && <video ref={qrVideoRef} className="guard-qr-video" muted playsInline />}
-        </div>
+        <GuardVisitorQrPanel
+          token={token}
+          codeRequest={visitorScannerCodeRequest}
+          onRecorded={handleVisitorQrRecorded}
+        />
 
         <div style={{ marginBottom: '1rem', padding: '1rem', backgroundColor: 'white', borderRadius: '0.5rem', boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
@@ -1043,7 +928,7 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
                       <div key={index} className="pre-reg-companion-item">
                         <strong>{companion.firstName} {companion.lastName}</strong>
                         <span>{companion.relationshipToResident}</span>
-                        <span>ID: {companion.identification}</span>
+                        <span>{companion.identificationDocument?.path ? 'Identification file uploaded' : (companion.identification ? `ID: ${companion.identification}` : 'No identification file')}</span>
                       </div>
                     ))}
                   </div>

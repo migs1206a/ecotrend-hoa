@@ -13,3 +13,10 @@ Full-stack HOA management system.
 - Deploy the frontend as a static React build.
 - Use MongoDB Atlas for the production database.
 - Set production secrets through the host's environment variable settings. Do not commit `.env` files.
+
+## CCTV Relay
+
+For self-hosted CCTV relay setup files and production steps, see:
+
+- [docs/CCTV_RELAY_SETUP.md](docs/CCTV_RELAY_SETUP.md)
+- `infra/cctv-relay/`

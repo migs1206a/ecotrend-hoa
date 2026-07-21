@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { AlertCircle, Download, X } from 'lucide-react';
 import { apiUrl } from '../../utils/api';
-import './VisitorIdentificationModal.css';
+import FileViewerModal from './FileViewerModal';
 
 const VisitorIdentificationModal = ({ visitor, token, onClose }) => {
   const [documentUrl, setDocumentUrl] = useState('');
@@ -61,50 +60,18 @@ const VisitorIdentificationModal = ({ visitor, token, onClose }) => {
   }, [token, visitor?._id]);
 
   return (
-    <div className="visitor-id-viewer-overlay" onClick={onClose}>
-      <div className="visitor-id-viewer-container" onClick={(event) => event.stopPropagation()}>
-        <div className="visitor-id-viewer-header">
-          <div>
-            <h3>Visitor Identification</h3>
-            <p>{visitor?.name || 'Visitor'} - {originalName}</p>
-          </div>
-          <div className="visitor-id-viewer-actions">
-            <a
-              href={documentUrl || '#'}
-              download={originalName}
-              className="visitor-id-viewer-download"
-              onClick={(event) => {
-                if (!documentUrl) {
-                  event.preventDefault();
-                }
-              }}
-            >
-              <Download size={18} /> Download
-            </a>
-            <button type="button" onClick={onClose} className="visitor-id-viewer-close">
-              <X size={20} />
-            </button>
-          </div>
-        </div>
-        <div className="visitor-id-viewer-content">
-          {loadingDocument ? (
-            <div className="visitor-id-viewer-message">
-              <div className="visitor-id-viewer-spinner" />
-              <p>Loading document...</p>
-            </div>
-          ) : documentError ? (
-            <div className="visitor-id-viewer-message visitor-id-viewer-message-error">
-              <AlertCircle size={28} />
-              <p>{documentError}</p>
-            </div>
-          ) : isPDF ? (
-            <iframe src={documentUrl} title="Visitor Identification Document" className="visitor-id-viewer-frame" />
-          ) : (
-            <img src={documentUrl} alt="Visitor Identification Document" className="visitor-id-viewer-image" />
-          )}
-        </div>
-      </div>
-    </div>
+    <FileViewerModal
+      title="Visitor Identification"
+      subtitle={`${visitor?.name || 'Visitor'} - ${originalName}`}
+      fileUrl={documentUrl}
+      downloadUrl={documentUrl}
+      downloadName={originalName}
+      isPdf={isPDF}
+      loading={loadingDocument}
+      error={documentError}
+      emptyMessage="No visitor identification is attached to this record."
+      onClose={onClose}
+    />
   );
 };
 

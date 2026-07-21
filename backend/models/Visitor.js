@@ -112,8 +112,11 @@ const VisitorSchema = new mongoose.Schema({
     },
     identification: {
       type: String,
-      required: true,
       trim: true
+    },
+    identificationDocument: {
+      type: fileSchema,
+      default: null
     }
   }],
   guardOnDuty: {

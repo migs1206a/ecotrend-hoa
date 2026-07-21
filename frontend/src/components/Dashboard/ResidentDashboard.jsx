@@ -25,7 +25,7 @@ import {
   validateNameValue,
   validatePhoneNumberValue
 } from '../../utils/formSecurity';
-import { IMAGE_UPLOAD_MAX_BYTES, formatFileSize, validateImageFile } from '../../utils/uploadValidation';
+import { IMAGE_UPLOAD_MAX_BYTES, validateImageFile } from '../../utils/uploadValidation';
 import {
   formatResidentAddress,
   formatResidentExpiry,
@@ -294,7 +294,7 @@ const ResidentDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const [visitorForm, setVisitorForm] = useState({
   entryType: 'visitor',
   visitorLastName: '', visitorFirstName: '', visitorMiddleName: '',
-  visitorContact: '+63', visitorRelationshipToResident: '', visitorIdentification: '', purposeOfVisit: '',
+  visitorContact: '+63', visitorRelationshipToResident: '', purposeOfVisit: '',
   deliveryDriverName: '', deliveryContact: '+63',
   expectedDate: '', vehiclePlateNumber: '', vehicleType: '', vehicleColor: '',
   accompanyingVisitors: []
@@ -310,18 +310,15 @@ const ResidentDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const token = localStorage.getItem('token');
   const sanitizePlateNumberInput = (value, maxLength = 10) =>
     String(value || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, maxLength);
-  const sanitizeIdInput = (value, maxLength = 12) =>
-    String(value || '').replace(/\D/g, '').slice(0, maxLength);
   const textOnlyPattern = /^[A-Za-z\s.'-]+$/;
   const purposePattern = /^[A-Za-z\s.,'-]+$/;
-  const idPattern = /^\d{1,12}$/;
 
   const addAccompanyingVisitor = () => {
     setVisitorForm((current) => ({
       ...current,
       accompanyingVisitors: [
         ...(current.accompanyingVisitors || []),
-        { relationshipToResident: '', lastName: '', firstName: '', identification: '' }
+        { relationshipToResident: '', lastName: '', firstName: '', identificationFile: null }
       ]
     }));
   };
@@ -333,9 +330,7 @@ const ResidentDashboard = ({ onLogout, showConfirm, showAlert }) => {
         if (companionIndex !== index) return companion;
         const sanitizedValue = ['lastName', 'firstName'].includes(field)
           ? sanitizeNameInput(value, 30)
-          : field === 'identification'
-            ? sanitizeIdInput(value, 12)
-            : String(value || '').replace(/[^a-zA-Z\s.'-]/g, '').slice(0, 40);
+          : String(value || '').replace(/[^a-zA-Z\s.'-]/g, '').slice(0, 40);
         return { ...companion, [field]: sanitizedValue };
       })
     }));
@@ -354,19 +349,64 @@ const ResidentDashboard = ({ onLogout, showConfirm, showAlert }) => {
       return;
     }
 
-    if (!VISITOR_ID_MIME_TYPES.includes(String(file.type || '').toLowerCase())) {
+    const validation = validateImageFile(file, {
+      label: 'Visitor identification',
+      maxBytes: IMAGE_UPLOAD_MAX_BYTES
+    });
+
+    if (!validation.valid) {
+      showAlert(validation.message.replace('JPG, PNG, or GIF', 'JPG or PNG'), 'error');
+      setVisitorIdentificationFile(null);
+      return;
+    }
+
+    if (!VISITOR_ID_MIME_TYPES.includes(String(file?.type || '').toLowerCase())) {
       showAlert('Visitor identification must be a JPG or PNG image.', 'error');
       setVisitorIdentificationFile(null);
       return;
     }
 
-    if (file.size > IMAGE_UPLOAD_MAX_BYTES) {
-      showAlert(`Visitor identification is too large. Maximum size is ${formatFileSize(IMAGE_UPLOAD_MAX_BYTES)}.`, 'error');
-      setVisitorIdentificationFile(null);
+    setVisitorIdentificationFile(file);
+  };
+
+  const handleCompanionIdentificationFile = (index, file) => {
+    if (!file) {
+      setVisitorForm((current) => ({
+        ...current,
+        accompanyingVisitors: (current.accompanyingVisitors || []).map((companion, companionIndex) =>
+          companionIndex === index ? { ...companion, identificationFile: null } : companion
+        )
+      }));
       return;
     }
 
-    setVisitorIdentificationFile(file);
+    const validation = validateImageFile(file, {
+      label: `Companion ${index + 1} identification`,
+      maxBytes: IMAGE_UPLOAD_MAX_BYTES
+    });
+
+    if (!validation.valid) {
+      showAlert(validation.message.replace('JPG, PNG, or GIF', 'JPG or PNG'), 'error');
+      setVisitorForm((current) => ({
+        ...current,
+        accompanyingVisitors: (current.accompanyingVisitors || []).map((companion, companionIndex) =>
+          companionIndex === index ? { ...companion, identificationFile: null } : companion
+        )
+      }));
+      return;
+    }
+
+    if (!VISITOR_ID_MIME_TYPES.includes(String(file?.type || '').toLowerCase())) {
+      showAlert(`Companion ${index + 1} identification must be a JPG or PNG image.`, 'error');
+      return;
+    }
+
+    setVisitorForm((current) => ({
+      ...current,
+      accompanyingVisitors: (current.accompanyingVisitors || []).map((companion, companionIndex) =>
+        companionIndex === index ? { ...companion, identificationFile: file } : companion
+      )
+    }));
   };
 
   const handleForgottenVisitorScan = async (visitor, checkpoint) => {
@@ -897,20 +937,14 @@ const handlePermanentDelete = (vehicleId) => {
   e.preventDefault();
   const { entryType } = visitorForm;
 
-  if (entryType === 'visitor' && (!visitorForm.visitorLastName || !visitorForm.visitorFirstName || !visitorForm.purposeOfVisit || !visitorForm.visitorRelationshipToResident || !visitorForm.visitorIdentification)) {
-    showAlert('Please fill in visitor name, relationship, identification, and purpose', 'error'); return;
+  if (entryType === 'visitor' && (!visitorForm.visitorLastName || !visitorForm.visitorFirstName || !visitorForm.purposeOfVisit || !visitorForm.visitorRelationshipToResident)) {
+    showAlert('Please fill in visitor name, relationship, and purpose', 'error'); return;
   }
   if (entryType === 'delivery' && !visitorForm.deliveryDriverName) {
     showAlert('Please fill in delivery driver name', 'error'); return;
   }
 
   if (entryType === 'visitor') {
-    const visitorId = sanitizeIdInput(visitorForm.visitorIdentification, 12);
-    if (!idPattern.test(visitorId)) {
-      showAlert('Visitor Identification ID Number must contain digits only and be up to 12 numbers.', 'error');
-      return;
-    }
-
     const relationship = String(visitorForm.visitorRelationshipToResident || '').trim();
     if (!relationship || relationship.length > 50 || !textOnlyPattern.test(relationship)) {
       showAlert('Relationship to resident must be text only and up to 50 characters.', 'error');
@@ -960,20 +994,14 @@ const handlePermanentDelete = (vehicleId) => {
       const companion = visitorForm.accompanyingVisitors[index];
       const label = `Companion ${index + 1}`;
       const relationshipToResident = String(companion.relationshipToResident || '').trim();
-      const identification = sanitizeIdInput(companion.identification, 12);
 
-      if (!relationshipToResident || !companion.lastName || !companion.firstName || !identification) {
-        showAlert(`Please complete relationship, name, and identification for ${label}`, 'error');
+      if (!relationshipToResident || !companion.lastName || !companion.firstName || !companion.identificationFile) {
+        showAlert(`Please complete relationship, name, and identification file for ${label}`, 'error');
         return;
       }
 
       if (relationshipToResident.length > 40 || !textOnlyPattern.test(relationshipToResident)) {
         showAlert(`${label} relationship must be text only and up to 40 characters.`, 'error');
-        return;
-      }
-
-      if (!idPattern.test(identification)) {
-        showAlert(`${label} ID number must contain digits only and be up to 12 numbers.`, 'error');
         return;
       }
 
@@ -998,15 +1026,13 @@ const handlePermanentDelete = (vehicleId) => {
       normalizedCompanions.push({
         relationshipToResident,
         lastName: lastNameValidation.value,
-        firstName: firstNameValidation.value,
-        identification
+        firstName: firstNameValidation.value
       });
     }
   }
 
   setLoading(true);
   try {
-    const visitorIdNumber = sanitizeIdInput(visitorForm.visitorIdentification, 12);
     const cleanedPurpose = String(visitorForm.purposeOfVisit || '').trim();
     const cleanedVehicleColor = String(visitorForm.vehicleColor || '').trim();
     const expectedDate = visitorForm.expectedDate ? new Date(visitorForm.expectedDate) : null;
@@ -1037,7 +1063,6 @@ const handlePermanentDelete = (vehicleId) => {
     formData.append('contactNumber', contactValidation.value);
     formData.append('purpose', entryType === 'visitor' ? cleanedPurpose : 'Delivery');
     formData.append('relationshipToResident', String(visitorForm.visitorRelationshipToResident || '').trim());
-    formData.append('identificationNumber', visitorIdNumber);
     formData.append('hostResidentId', user.id);
     formData.append('hostResidentName', profile?.familyName || user.username);
     formData.append('hostResidentAddress', `${profile?.houseAddress || ''}, ${profile?.street || ''}`.trim());
@@ -1050,6 +1075,12 @@ const handlePermanentDelete = (vehicleId) => {
 
     if (entryType === 'visitor' && visitorIdentificationFile) {
       formData.append('identificationFile', visitorIdentificationFile);
+      normalizedCompanions.forEach((_, index) => {
+        const companionFile = visitorForm.accompanyingVisitors?.[index]?.identificationFile;
+        if (companionFile) {
+          formData.append(`companionIdentificationFile_${index}`, companionFile);
+        }
+      });
     }
 
     const response = await fetch(apiUrl('/visitors/pre-register'), {
@@ -1063,7 +1094,7 @@ const handlePermanentDelete = (vehicleId) => {
       setVisitorForm({
         entryType: 'visitor',
         visitorLastName: '', visitorFirstName: '', visitorMiddleName: '',
-        visitorContact: '+63', visitorRelationshipToResident: '', visitorIdentification: '', purposeOfVisit: '',
+        visitorContact: '+63', visitorRelationshipToResident: '', purposeOfVisit: '',
         deliveryDriverName: '', deliveryContact: '+63',
         expectedDate: '', vehiclePlateNumber: '', vehicleType: '', vehicleColor: '',
         accompanyingVisitors: []
@@ -1763,29 +1794,14 @@ const handlePermanentDelete = (vehicleId) => {
       required
     />
   </div>
-  <div className="form-group">
-    <label>Identification ID Number *</label>
-    <input
-      type="text"
-      value={visitorForm.visitorIdentification}
-      onChange={(e) => setVisitorForm({ ...visitorForm, visitorIdentification: sanitizeIdInput(e.target.value, 12) })}
-      placeholder="ID number"
-      className="form-input"
-      inputMode="numeric"
-      pattern="\d{1,12}"
-      maxLength={12}
-      required
-    />
-  </div>
   <div className="form-group vr-span">
     <label>Upload Identification *</label>
     <input
-      key={visitorIdentificationFile ? 'visitor-id-file-selected' : 'visitor-id-file-empty'}
       type="file"
       accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+      onClick={(e) => { e.target.value = null; }}
       onChange={(e) => handleVisitorIdentificationFile(e.target.files?.[0] || null)}
       className="form-input"
-      required
     />
     <p className="vr-file-note">
       {visitorIdentificationFile ? visitorIdentificationFile.name : 'JPG or PNG only. Maximum 3 MB.'}
@@ -1856,17 +1872,17 @@ const handlePermanentDelete = (vehicleId) => {
             />
           </div>
           <div className="form-group">
-            <label>Identification *</label>
+            <label>Identification File *</label>
             <input
-              type="text"
-              value={companion.identification}
-              onChange={(e) => updateAccompanyingVisitor(index, 'identification', e.target.value)}
-              placeholder="ID number"
+              type="file"
+              accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+              onClick={(e) => { e.target.value = null; }}
+              onChange={(e) => handleCompanionIdentificationFile(index, e.target.files?.[0] || null)}
               className="form-input"
-              inputMode="numeric"
-              pattern="\d{1,12}"
-              maxLength={12}
             />
+            <p className="vr-file-note">
+              {companion.identificationFile?.name || 'JPG or PNG only. Maximum 3 MB.'}
+            </p>
           </div>
         </div>
       </div>

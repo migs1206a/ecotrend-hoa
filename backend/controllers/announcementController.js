@@ -1,9 +1,20 @@
 const Announcement = require('../models/Announcement');
 const { parsePagination, sendPaginatedResponse } = require('../utils/pagination');
-const {
-  notifyAnnouncementCreated,
-  notifyAnnouncementUpdated
-} = require('../utils/notificationService');
+const { createNotificationAndDispatch } = require('../utils/notificationService');
+
+const getAnnouncementTargetRoles = (targetAudience) => {
+  const normalizedAudience = String(targetAudience || 'all').trim().toLowerCase();
+
+  if (normalizedAudience === 'residents') {
+    return ['RESIDENT'];
+  }
+
+  if (normalizedAudience === 'guards') {
+    return ['GUARD'];
+  }
+
+  return ['ADMIN', 'GUARD', 'RESIDENT'];
+};
 
 // Get all announcements
 const getAnnouncements = async (req, res) => {
@@ -83,9 +94,23 @@ const createAnnouncement = async (req, res) => {
     });
 
     const savedAnnouncement = await announcement.save();
-    notifyAnnouncementCreated(savedAnnouncement).catch((notificationError) => {
-      console.error('Failed to publish announcement notification:', notificationError);
-    });
+
+    try {
+      await createNotificationAndDispatch({
+        type: 'announcement_created',
+        title: savedAnnouncement.title,
+        message: `New ${savedAnnouncement.category || 'general'} announcement from ${savedAnnouncement.postedBy || 'HOA Admin'}.`,
+        targetRoles: getAnnouncementTargetRoles(savedAnnouncement.targetAudience),
+        entityType: 'announcement',
+        entityId: savedAnnouncement._id,
+        metadata: {
+          category: savedAnnouncement.category || 'general',
+          targetAudience: savedAnnouncement.targetAudience || 'all'
+        }
+      });
+    } catch (notificationError) {
+      console.error('Announcement notification error:', notificationError);
+    }
     res.status(201).json(savedAnnouncement);
   } catch (error) {
     console.error('Error creating announcement:', error);
@@ -121,9 +146,22 @@ const updateAnnouncement = async (req, res) => {
       return res.status(404).json({ message: 'Announcement not found' });
     }
 
-    notifyAnnouncementUpdated(announcement).catch((notificationError) => {
-      console.error('Failed to publish announcement update notification:', notificationError);
-    });
+    try {
+      await createNotificationAndDispatch({
+        type: 'announcement_updated',
+        title: announcement.title,
+        message: `Announcement "${announcement.title}" has been updated by ${announcement.postedBy || 'HOA Admin'}.`,
+        targetRoles: getAnnouncementTargetRoles(announcement.targetAudience),
+        entityType: 'announcement',
+        entityId: announcement._id,
+        metadata: {
+          category: announcement.category || 'general',
+          targetAudience: announcement.targetAudience || 'all'
+        }
+      });
+    } catch (notificationError) {
+      console.error('Announcement update notification error:', notificationError);
+    }
     res.json(announcement);
   } catch (error) {
     console.error('Error updating announcement:', error);

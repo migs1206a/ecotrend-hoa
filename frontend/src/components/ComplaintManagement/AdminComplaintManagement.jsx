@@ -17,6 +17,7 @@ import './AdminComplaintManagement.css';
 import { downloadComplaintLetterPdf } from '../../utils/complaintLetterPdf';
 import PaginationControls from '../common/PaginationControls';
 import { buildPaginatedUrl, parsePaginatedResponse } from '../../utils/pagination';
+import FileViewerModal from '../common/FileViewerModal';
 
 const COMPLAINT_CATEGORY_OPTIONS = [
   { value: 'general', label: 'General Concern' },
@@ -527,15 +528,14 @@ const AdminComplaintManagement = ({ token }) => {
       <PaginationControls pagination={pagination} onPageChange={setPage} />
 
       {viewingPhoto && (
-        <div className="billing-receipt-modal" onClick={() => setViewingPhoto(null)}>
-          <div className="billing-receipt-card" onClick={(event) => event.stopPropagation()}>
-            <div className="billing-receipt-card-head">
-              <h3>Complaint Photo</h3>
-              <button onClick={() => setViewingPhoto(null)}><XCircle size={16} /></button>
-            </div>
-            <img src={assetUrl(viewingPhoto.path)} alt="Complaint" className="billing-receipt-image" />
-          </div>
-        </div>
+        <FileViewerModal
+          title="Complaint Photo"
+          subtitle={viewingPhoto.originalName || 'Complaint attachment'}
+          fileUrl={assetUrl(viewingPhoto.path)}
+          downloadUrl={assetUrl(viewingPhoto.path)}
+          downloadName={viewingPhoto.originalName || 'complaint-photo'}
+          onClose={() => setViewingPhoto(null)}
+        />
       )}
     </div>
   );

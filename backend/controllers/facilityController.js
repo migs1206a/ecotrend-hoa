@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { hasCloudinaryConfig } = require('../utils/cloudinary');
 const { storeUploadedFile, deleteStoredFile } = require('../utils/fileStorage');
 const { parsePagination, sendPaginatedResponse } = require('../utils/pagination');
+const { createNotificationAndDispatch } = require('../utils/notificationService');
 
 const DEFAULT_EVENT_TYPES = Object.freeze([
   'Birthday',
@@ -590,6 +591,96 @@ const serializeFacility = (facility, index = 0) => {
     eventTypes: sanitizeEventTypes(facilityObject.eventTypes),
     photo: facilityObject.photo || {}
   };
+};
+
+const safeNotify = async (payload, label) => {
+  try {
+    await createNotificationAndDispatch(payload);
+  } catch (error) {
+    console.error(`${label} notification error:`, error.message);
+  }
+};
+
+const notifyFacilityReservationCreated = async (reservation) => {
+  await safeNotify(
+    {
+      type: 'facility_reservation_created',
+      title: 'Facility reservation submitted',
+      message: `${reservation.residentName} submitted a ${reservation.facilityName} reservation request.`,
+      targetRoles: ['ADMIN', 'GUARD'],
+      entityType: 'facility_reservation',
+      entityId: reservation._id,
+      metadata: {
+        residentId: String(reservation.residentId || ''),
+        facilityName: String(reservation.facilityName || ''),
+        status: String(reservation.status || '')
+      }
+    },
+    'Facility reservation created'
+  );
+};
+
+const notifyFacilityReservationResident = async ({
+  reservation,
+  type,
+  title,
+  message,
+  extraMetadata = {}
+}) => {
+  const residentId = String(reservation?.residentId || '').trim();
+  if (!residentId) {
+    return;
+  }
+
+  await safeNotify(
+    {
+      type,
+      title,
+      message,
+      targetUserIds: [residentId],
+      entityType: 'facility_reservation',
+      entityId: reservation._id,
+      metadata: {
+        residentId,
+        facilityName: String(reservation.facilityName || ''),
+        status: String(reservation.status || ''),
+        ...extraMetadata
+      }
+    },
+    'Facility reservation resident'
+  );
+};
+
+const notifyFacilityGuestCheckpoint = async (reservation, checkpointRecord) => {
+  const residentId = String(reservation?.residentId || '').trim();
+  if (!residentId || !checkpointRecord?.checkpoint) {
+    return;
+  }
+
+  const type = checkpointRecord.checkpoint === 'gate_exit'
+    ? 'facility_guest_gate_exit'
+    : 'facility_guest_gate_entry';
+  const title = checkpointRecord.checkpoint === 'gate_exit'
+    ? 'Facility guest gate exit'
+    : 'Facility guest gate entry';
+
+  await safeNotify(
+    {
+      type,
+      title,
+      message: `${reservation.facilityName} guest ${checkpointRecord.sequenceNumber}/${checkpointRecord.sequenceTotal} recorded ${checkpointRecord.label || checkpointRecord.checkpoint}.`,
+      targetUserIds: [residentId],
+      entityType: 'facility_reservation',
+      entityId: reservation._id,
+      metadata: {
+        residentId,
+        facilityName: String(reservation.facilityName || ''),
+        checkpoint: String(checkpointRecord.checkpoint || ''),
+        checkpointLabel: String(checkpointRecord.label || '')
+      }
+    },
+    'Facility guest checkpoint'
+  );
 };
 
 const getSettings = async () => {
@@ -1296,6 +1387,7 @@ const createReservation = async (req, res) => {
       });
 
       const savedReservation = await reservation.save();
+      await notifyFacilityReservationCreated(savedReservation);
       const [enrichedReservation] = attachFacilityMetadata([savedReservation.toObject()], settings);
       return res.status(201).json(enrichedReservation);
     } finally {
@@ -1391,6 +1483,12 @@ const verifyPayment = async (req, res) => {
     reservation.isPaid = true;
     reservation.paymentStatus = 'verified';
     await reservation.save();
+    await notifyFacilityReservationResident({
+      reservation,
+      type: 'facility_reservation_payment_verified',
+      title: 'Facility payment verified',
+      message: `Payment for ${reservation.facilityName} has been verified.`
+    });
 
     res.json(reservation);
   } catch (error) {
@@ -1430,6 +1528,12 @@ const approveReservation = async (req, res) => {
     synchronizeFacilityGuestQrState(reservation);
 
     await reservation.save();
+    await notifyFacilityReservationResident({
+      reservation,
+      type: 'facility_reservation_approved',
+      title: 'Facility reservation approved',
+      message: `${reservation.facilityName} reservation has been approved.`
+    });
     const settings = await getSettings();
     res.json(serializeFacilityReservation(reservation, settings));
   } catch (error) {
@@ -1468,6 +1572,15 @@ const rejectReservation = async (req, res) => {
     synchronizeFacilityGuestQrState(reservation);
 
     await reservation.save();
+    await notifyFacilityReservationResident({
+      reservation,
+      type: 'facility_reservation_rejected',
+      title: 'Facility reservation rejected',
+      message: `${reservation.facilityName} reservation was rejected.`,
+      extraMetadata: {
+        rejectionReason: String(reservation.rejectionReason || '')
+      }
+    });
     const settings = await getSettings();
     res.json(serializeFacilityReservation(reservation, settings));
   } catch (error) {
@@ -1506,6 +1619,7 @@ const scanFacilityGuestQr = async (req, res) => {
 
     await reservation.save();
     await recordFacilityGuestCheckpointLog(reservation, checkpoint, req.user, result);
+    await notifyFacilityGuestCheckpoint(reservation, result.value);
 
     const settings = await getSettings();
     return res.json({
@@ -1537,6 +1651,7 @@ const markForgottenFacilityGuestCheckpoint = async (req, res) => {
 
     await reservation.save();
     await recordFacilityGuestCheckpointLog(reservation, checkpoint, req.user, result);
+    await notifyFacilityGuestCheckpoint(reservation, result.value);
 
     const settings = await getSettings();
     return res.json({

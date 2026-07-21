@@ -58,6 +58,10 @@
   grid-column: 1 / -1;
 }
 
+.cctv-field--security {
+  grid-column: 1 / -1;
+}
+
 .cctv-field span {
   color: var(--gray-700);
   font-size: 0.84rem;
@@ -76,6 +80,11 @@
   font-size: 0.92rem;
   padding: 0.78rem 0.9rem;
   resize: vertical;
+}
+
+.cctv-field small {
+  color: var(--gray-500);
+  line-height: 1.45;
 }
 
 .cctv-field input:focus,
@@ -121,6 +130,33 @@
   background: linear-gradient(135deg, var(--primary-green), var(--accent-teal));
   color: var(--white);
   box-shadow: 0 6px 16px rgba(16, 185, 129, 0.22);
+}
+
+.cctv-security-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(16, 185, 129, 0.18);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, rgba(236, 253, 245, 0.95), rgba(240, 253, 250, 0.98));
+  color: var(--gray-700);
+}
+
+.cctv-security-note svg {
+  flex-shrink: 0;
+  color: var(--primary-green);
+}
+
+.cctv-security-note strong,
+.cctv-security-note p {
+  margin: 0;
+}
+
+.cctv-security-note p {
+  margin-top: 0.22rem;
+  color: var(--gray-500);
+  line-height: 1.5;
 }
 
 .cctv-secondary-btn,
@@ -232,11 +268,45 @@
   padding: 1rem;
 }
 
+.cctv-feed-header-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
 .cctv-feed-title-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
+}
+
+.cctv-feed-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.cctv-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.34rem;
+  padding: 0.36rem 0.64rem;
+  border-radius: var(--radius-full);
+  background: var(--gray-100);
+  color: var(--gray-600);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.cctv-meta-pill.is-ready {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--primary-green-dark);
+}
+
+.cctv-meta-pill.is-pending {
+  background: rgba(59, 130, 246, 0.1);
+  color: #1d4ed8;
 }
 
 .cctv-status {
@@ -260,14 +330,41 @@
   color: var(--gray-500);
 }
 
+.cctv-feed-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
 .cctv-location,
-.cctv-notes {
+.cctv-notes,
+.cctv-monitoring-summary,
+.cctv-technical-summary,
+.cctv-security-inline {
   margin: 0.35rem 0 0;
   color: var(--gray-500);
   line-height: 1.5;
 }
 
 .cctv-location {
+  font-weight: 700;
+}
+
+.cctv-monitoring-summary {
+  color: var(--gray-700);
+}
+
+.cctv-technical-summary {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.8rem;
+  color: var(--gray-500);
+}
+
+.cctv-security-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--primary-green-dark);
   font-weight: 700;
 }
 

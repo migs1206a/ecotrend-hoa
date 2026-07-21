@@ -12,6 +12,7 @@ const {
   validatePhoneNumberField
 } = require('../utils/fieldValidation');
 const { isOfficer } = require('../utils/adminPermissions');
+const { createNotificationAndDispatch } = require('../utils/notificationService');
 
 const BACKEND_ROOT = path.join(__dirname, '..');
 const UPLOADS_ROOT = path.join(BACKEND_ROOT, 'uploads');
@@ -113,16 +114,6 @@ const buildQrCheckpoints = (visitor) => {
 const generateQrToken = () => crypto.randomBytes(24).toString('hex');
 const generateQrManualCode = (length = 8) =>
   Array.from({ length }, () => QR_MANUAL_CODE_ALPHABET[crypto.randomInt(0, QR_MANUAL_CODE_ALPHABET.length)]).join('');
-
-const normalizeIdentificationNumber = (value) => {
-  const normalized = String(value || '').trim().replace(/\D/g, '');
-
-  if (!normalized || normalized.length > 12) {
-    return { error: 'Visitor Identification ID Number must contain digits only and be up to 12 numbers.' };
-  }
-
-  return { value: normalized };
-};
 
 const normalizeRelationship = (value, label = 'Relationship to resident') => {
   const normalized = String(value || '').trim().replace(/\s+/g, ' ');
@@ -414,7 +405,6 @@ const normalizeAccompanyingVisitors = (companions) => {
     const companion = companions[index] || {};
     const label = `Companion ${index + 1}`;
     const relationshipValidation = normalizeRelationship(companion.relationshipToResident, `${label} relationship to resident`);
-    const identification = String(companion.identification || '').trim().replace(/\s+/g, ' ');
 
     if (relationshipValidation.error) {
       return { error: relationshipValidation.error };
@@ -436,19 +426,111 @@ const normalizeAccompanyingVisitors = (companions) => {
       return { error: firstNameValidation.error };
     }
 
-    if (!identification || identification.length > 80) {
-      return { error: `${label} identification is required and must not exceed 80 characters` };
-    }
-
     normalizedCompanions.push({
       relationshipToResident: relationshipValidation.value,
       lastName: lastNameValidation.value,
-      firstName: firstNameValidation.value,
-      identification
+      firstName: firstNameValidation.value
     });
   }
 
   return { value: normalizedCompanions };
+};
+
+const safeNotify = async (payload, label) => {
+  try {
+    await createNotificationAndDispatch(payload);
+  } catch (error) {
+    console.error(`${label} notification error:`, error.message);
+  }
+};
+
+const notifyVisitorPendingReview = async (visitor) => {
+  await safeNotify(
+    {
+      type: 'visitor_pre_registration_pending',
+      title: 'Visitor approval required',
+      message: `${visitor.name} is waiting for pre-registration approval.`,
+      targetRoles: ['ADMIN', 'GUARD'],
+      entityType: 'visitor',
+      entityId: visitor._id,
+      metadata: {
+        residentId: String(visitor.hostResident || ''),
+        residentName: String(visitor.hostResidentName || ''),
+        reviewStatus: String(visitor.reviewStatus || '')
+      }
+    },
+    'Visitor pending review'
+  );
+};
+
+const notifyVisitorReviewDecision = async (visitor, decision) => {
+  const residentId = String(visitor?.hostResident || '').trim();
+  if (!residentId) {
+    return;
+  }
+
+  const normalizedDecision = String(decision || '').trim().toLowerCase();
+  const approved = normalizedDecision === 'approved';
+
+  await safeNotify(
+    {
+      type: approved
+        ? 'visitor_pre_registration_approved'
+        : 'visitor_pre_registration_rejected',
+      title: approved ? 'Visitor approved' : 'Visitor rejected',
+      message: approved
+        ? `${visitor.name} is approved for ${visitor.qrEntryEnabled ? 'QR' : 'visitor'} entry.`
+        : `${visitor.name} was not approved for pre-registration.`,
+      targetUserIds: [residentId],
+      entityType: 'visitor',
+      entityId: visitor._id,
+      metadata: {
+        residentId,
+        residentName: String(visitor.hostResidentName || ''),
+        reviewStatus: String(visitor.reviewStatus || ''),
+        qrEntryEnabled: Boolean(visitor.qrEntryEnabled)
+      }
+    },
+    'Visitor review decision'
+  );
+};
+
+const notifyVisitorCheckpoint = async (visitor, checkpointRecord) => {
+  const residentId = String(visitor?.hostResident || '').trim();
+  if (!residentId || !checkpointRecord?.checkpoint) {
+    return;
+  }
+
+  const checkpointTypeMap = {
+    gate_entry: 'visitor_gate_entry',
+    home_arrival: 'visitor_home_arrival',
+    home_exit: 'visitor_home_exit',
+    gate_exit: 'visitor_gate_exit'
+  };
+  const checkpointTitleMap = {
+    gate_entry: 'Visitor gate entry',
+    home_arrival: 'Visitor home entry',
+    home_exit: 'Visitor home exit',
+    gate_exit: 'Visitor gate exit'
+  };
+
+  await safeNotify(
+    {
+      type: checkpointTypeMap[checkpointRecord.checkpoint] || 'visitor_gate_entry',
+      title: checkpointTitleMap[checkpointRecord.checkpoint] || 'Visitor checkpoint recorded',
+      message: `${checkpointRecord.memberLabel || visitor.name} recorded ${checkpointRecord.label || checkpointRecord.checkpoint}.`,
+      targetUserIds: [residentId],
+      entityType: 'visitor',
+      entityId: visitor._id,
+      metadata: {
+        residentId,
+        residentName: String(visitor.hostResidentName || ''),
+        checkpoint: String(checkpointRecord.checkpoint || ''),
+        checkpointLabel: String(checkpointRecord.label || '')
+      }
+    },
+    'Visitor checkpoint'
+  );
 };
 
 // @desc    Register new visitor (by guard - immediate entry)
@@ -517,7 +599,7 @@ exports.registerVisitor = async (req, res) => {
 // @route   POST /api/visitors/pre-register
 // @access  Resident only
 exports.preRegisterVisitor = async (req, res) => {
-  let storedIdentification = null;
+  const storedFiles = [];
 
   try {
     const { 
@@ -526,7 +608,6 @@ exports.preRegisterVisitor = async (req, res) => {
       contactNumber, 
       purpose, 
       relationshipToResident,
-      identificationNumber,
       hostResidentId,
       hostResidentName,
       hostResidentAddress,
@@ -571,7 +652,9 @@ exports.preRegisterVisitor = async (req, res) => {
     }
 
     let relationshipValidation = { value: '' };
-    let identificationValidation = { value: '' };
+    let storedIdentification = null;
+    const uploadedFiles = Array.isArray(req.files) ? req.files : [];
+    const mainIdentificationFile = uploadedFiles.find((file) => file.fieldname === 'identificationFile');
 
     if (normalizedEntryType === 'visitor') {
       relationshipValidation = normalizeRelationship(relationshipToResident);
@@ -579,21 +662,45 @@ exports.preRegisterVisitor = async (req, res) => {
         return res.status(400).json({ message: relationshipValidation.error });
       }
 
-      identificationValidation = normalizeIdentificationNumber(identificationNumber);
-      if (identificationValidation.error) {
-        return res.status(400).json({ message: identificationValidation.error });
-      }
-
-      if (!req.file) {
+      if (!mainIdentificationFile) {
         return res.status(400).json({ message: 'Visitor identification image is required.' });
       }
 
-      storedIdentification = await storeUploadedFile(req.file, {
+      for (let index = 0; index < companionsValidation.value.length; index += 1) {
+        const companionFileFieldName = `companionIdentificationFile_${index}`;
+        const companionFile = uploadedFiles.find((file) => file.fieldname === companionFileFieldName);
+
+        if (!companionFile) {
+          return res.status(400).json({ message: `Companion ${index + 1} identification image is required.` });
+        }
+      }
+
+      storedIdentification = await storeUploadedFile(mainIdentificationFile, {
         folder: 'ecotrend-hoa/visitor-identifications',
         localDir: 'uploads/visitor-identifications',
         prefix: 'visitor-id',
         resourceType: 'image'
       });
+      storedFiles.push(storedIdentification);
+      companionsValidation.value = await Promise.all(
+        companionsValidation.value.map(async (companion, index) => {
+          const companionStoredIdentification = await storeUploadedFile(
+            uploadedFiles.find((file) => file.fieldname === `companionIdentificationFile_${index}`),
+            {
+              folder: 'ecotrend-hoa/visitor-identifications',
+              localDir: 'uploads/visitor-identifications',
+              prefix: `visitor-companion-id-${index + 1}`,
+              resourceType: 'image'
+            }
+          );
+          storedFiles.push(companionStoredIdentification);
+
+          return {
+            ...companion,
+            identificationDocument: companionStoredIdentification
+          };
+        })
+      );
     }
 
     const expectedDateValidation = validateFutureExpectedDate(expectedDate);
@@ -606,7 +713,7 @@ exports.preRegisterVisitor = async (req, res) => {
       contactNumber: contactNumberValidation.value,
       entryType: normalizedEntryType === 'delivery' ? 'delivery' : 'visitor',
       relationshipToResident: relationshipValidation.value,
-      identificationNumber: identificationValidation.value,
+      identificationNumber: '',
       identificationDocument: storedIdentification,
       purpose: String(purpose || '').trim(),
       hostResident: hostResidentId,
@@ -623,17 +730,20 @@ exports.preRegisterVisitor = async (req, res) => {
     });
 
     await visitor.save();
+    await notifyVisitorPendingReview(visitor);
 
     res.status(201).json({
       message: 'Visitor pre-registered successfully',
       visitor
     });
   } catch (error) {
-    if (storedIdentification) {
-      await deleteStoredFile(storedIdentification).catch((cleanupError) => {
-        console.error('Visitor identification cleanup error:', cleanupError);
-      });
-    }
+    await Promise.all(
+      storedFiles.map((storedFile) =>
+        deleteStoredFile(storedFile).catch((cleanupError) => {
+          console.error('Visitor identification cleanup error:', cleanupError);
+        })
+      )
+    );
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
@@ -841,6 +951,7 @@ exports.reviewPreRegisteredVisitor = async (req, res) => {
     }
 
     await visitor.save();
+    await notifyVisitorReviewDecision(visitor, normalizedDecision);
 
     return res.json({
       message: normalizedDecision === 'approved'
@@ -946,6 +1057,7 @@ exports.scanVisitorQr = async (req, res) => {
 
     await visitor.save();
     await recordQrCheckpointLog(visitor, checkpoint, req.user, result);
+    await notifyVisitorCheckpoint(visitor, result.value);
 
     return res.json({
       message: `${result.value.label || 'QR checkpoint'} recorded successfully.`,
@@ -984,6 +1096,7 @@ exports.markForgottenQrCheckpoint = async (req, res) => {
 
     await visitor.save();
     await recordQrCheckpointLog(visitor, checkpoint, req.user, result);
+    await notifyVisitorCheckpoint(visitor, result.value);
 
     return res.json({
       message: `${result.value.label || 'QR checkpoint'} bypassed successfully.`,

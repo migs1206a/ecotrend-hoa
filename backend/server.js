@@ -131,6 +131,7 @@ app.use('/api/cctv-feeds', require('./routes/cctvFeeds'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/admin-ai', require('./routes/adminChatbot'));
+app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/master-admin', masterAdminRoutes);
 
 // Root endpoint

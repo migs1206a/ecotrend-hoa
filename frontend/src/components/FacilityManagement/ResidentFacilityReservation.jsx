@@ -10,6 +10,7 @@ import { apiUrl, assetUrl } from '../../utils/api';
 import PaginationControls from '../common/PaginationControls';
 import { buildPaginatedUrl, parsePaginatedResponse } from '../../utils/pagination';
 import FacilityReservationCalendar from './FacilityReservationCalendar';
+import FileViewerModal from '../common/FileViewerModal';
 import {
   buildFacilityGuestQrPayload,
   formatFacilityGuestQrAccessCode,
@@ -862,39 +863,26 @@ const ResidentFacilityReservation = ({ token, showAlert }) => {
       <PaginationControls pagination={pagination} onPageChange={setPage} />
 
       {viewingReceipt && renderFacilityPortal(
-        <div className="modal-overlay" onClick={() => setViewingReceipt(null)}>
-          <div className="modal-content" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-header">
-              <h3>{viewingReceipt.facilityName} Receipt</h3>
-              <button onClick={() => setViewingReceipt(null)} className="modal-close">
-                <XCircle size={24} />
-              </button>
-            </div>
-            <div className="modal-body">
-              {viewingReceipt.paymentReceipt.mimetype === 'application/pdf' ? (
-                <iframe src={assetUrl(viewingReceipt.paymentReceipt.path)} className="receipt-pdf" title="Payment Receipt" />
-              ) : (
-                <img src={assetUrl(viewingReceipt.paymentReceipt.path)} alt="Payment Receipt" className="receipt-image" />
-              )}
-            </div>
-          </div>
-        </div>
+        <FileViewerModal
+          title={`${viewingReceipt.facilityName} Receipt`}
+          subtitle={viewingReceipt.paymentReceipt.originalName || 'Payment receipt'}
+          fileUrl={assetUrl(viewingReceipt.paymentReceipt.path)}
+          downloadUrl={assetUrl(viewingReceipt.paymentReceipt.path)}
+          downloadName={viewingReceipt.paymentReceipt.originalName || `${viewingReceipt.facilityName}-receipt`}
+          isPdf={viewingReceipt.paymentReceipt.mimetype === 'application/pdf'}
+          onClose={() => setViewingReceipt(null)}
+        />
       )}
 
       {viewingQr && settings?.gcashQr?.path && renderFacilityPortal(
-        <div className="modal-overlay" onClick={() => setViewingQr(false)}>
-          <div className="modal-content" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Facility GCash QR</h3>
-              <button onClick={() => setViewingQr(false)} className="modal-close">
-                <XCircle size={24} />
-              </button>
-            </div>
-            <div className="modal-body">
-              <img src={assetUrl(settings.gcashQr.path)} alt="Facility GCash QR" className="receipt-image" />
-            </div>
-          </div>
-        </div>
+        <FileViewerModal
+          title="Facility GCash QR"
+          subtitle={settings.gcashQr.originalName || 'Facility payment QR'}
+          fileUrl={assetUrl(settings.gcashQr.path)}
+          downloadUrl={assetUrl(settings.gcashQr.path)}
+          downloadName={settings.gcashQr.originalName || 'facility-gcash-qr'}
+          onClose={() => setViewingQr(false)}
+        />
       )}
 
       {showForm && renderFacilityPortal(

@@ -113,6 +113,15 @@ router.get(
   }),
   residentController.getVehiclePhoto
 );
+router.get(
+  '/:id/vehicles/:vehicleId/photo/file',
+  requireAccess({
+    modules: ['vehicles'],
+    allowResidentSelf: true,
+    selfParam: 'id'
+  }),
+  residentController.viewVehiclePhoto
+);
 
 router.get(
   '/:id',

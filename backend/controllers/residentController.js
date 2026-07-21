@@ -914,3 +914,55 @@ exports.getVehiclePhoto = async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
+
+exports.viewVehiclePhoto = async (req, res) => {
+  try {
+    const resident = await User.findById(req.params.id);
+
+    if (!resident || isSoftDeleted(resident)) {
+      return res.status(404).json({ message: 'Resident not found' });
+    }
+
+    const vehicle = resident.vehicles.id(req.params.vehicleId);
+    if (!vehicle) {
+      return res.status(404).json({ message: 'Vehicle not found' });
+    }
+
+    const photo = vehicle.photo;
+    if (!photo || !photo.path) {
+      return res.status(404).json({ message: 'No photo found for this vehicle' });
+    }
+
+    const setInlinePhotoHeaders = () => {
+      const originalName = sanitizeHeaderFilename(photo.originalName || photo.filename || 'vehicle-photo');
+      res.setHeader('Content-Type', photo.mimetype || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `inline; filename="${originalName}"`);
+      res.setHeader('Cache-Control', 'private, no-store');
+    };
+
+    if (photo.storage === 'local' && photo.path.startsWith('/uploads/')) {
+      const localPath = path.resolve(BACKEND_ROOT, photo.path.replace(/^\//, ''));
+      const uploadsRoot = path.resolve(UPLOADS_ROOT);
+
+      if (!localPath.startsWith(`${uploadsRoot}${path.sep}`) || !fs.existsSync(localPath)) {
+        return res.status(404).json({ message: 'Vehicle photo file not found' });
+      }
+
+      setInlinePhotoHeaders();
+      return res.sendFile(localPath);
+    }
+
+    if (/^https?:\/\//i.test(photo.path)) {
+      setInlinePhotoHeaders();
+      await pipeRemoteFile(photo.path, res);
+      return undefined;
+    }
+
+    return res.status(404).json({ message: 'Vehicle photo file not found' });
+  } catch (error) {
+    if (!res.headersSent) {
+      res.status(500).json({ message: 'Failed to load vehicle photo', error: error.message });
+    }
+    return undefined;
+  }
+};

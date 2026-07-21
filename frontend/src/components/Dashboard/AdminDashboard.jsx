@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import ecohoa from '../../assets/ecohoa.png';
-import { apiUrl, assetUrl } from '../../utils/api';
+import { apiUrl } from '../../utils/api';
 import { 
   Home, LogOut, Users, Car, UserCheck, Calendar, 
   Bell, BarChart3, FileText, Shield,
   Menu, X, ChevronRight, TrendingUp, AlertCircle, CheckCircle, XCircle,
-  Eye, Download, Search, Clock, MapPin, Phone, Package, User,
+  Eye, Search, Clock, MapPin, Phone, Package, User,
   LayoutGrid, Table2, Mail, Bot, Receipt, Camera, Map as MapIcon, History, QrCode
 } from 'lucide-react';
 import './AdminDashboard.css';
@@ -24,6 +24,7 @@ import ManageAccountsModule from '../Accounts/ManageAccountsModule';
 import AIAnalyticsModule from '../Analytics/AIAnalyticsModule';
 import AdminAIChatbotModule from '../Chatbot/AdminAIChatbotModule';
 import PaginationControls from '../common/PaginationControls';
+import FileViewerModal from '../common/FileViewerModal';
 import VisitorIdentificationModal from '../common/VisitorIdentificationModal';
 import { PAGE_SIZE, buildPaginatedUrl, parsePaginatedResponse } from '../../utils/pagination';
 import { SUBDIVISION_MAP_MODULE, hasAdminModuleAccess, getUserRoleLabel } from '../../utils/adminPermissions';
@@ -109,6 +110,10 @@ const formatResidentDraftAddress = (draft = {}, propertyType = 'house') => {
 };
 
 const getVisitorPartySize = (visitor) => 1 + (Array.isArray(visitor?.accompanyingVisitors) ? visitor.accompanyingVisitors.length : 0);
+const getVehiclePhotoCacheKey = (vehicle = {}) =>
+  `${vehicle?.ownerId || 'owner'}:${vehicle?._id || vehicle?.plateNumber || 'vehicle'}`;
+const getVehiclePhotoFileUrl = (vehicle = {}) =>
+  apiUrl(`/residents/${vehicle?.ownerId}/vehicles/${vehicle?._id}/photo/file`);
 
 // ── OUTSIDE AdminDashboard kasi nagbblink due to currentTime re-renders (nakikisabay yarn HAHAHA) ──────
 
@@ -452,7 +457,16 @@ const ResidentDetailModal = ({
 
         <div className="modal-section">
           <h4 className="modal-section-title">Identification Document</h4>
-          <button onClick={() => onViewDocument(resident)} className="btn-view-document"><Eye size={16} /> View Document</button>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onViewDocument(resident);
+            }}
+            className="btn-view-document"
+          >
+            <Eye size={16} /> View Document
+          </button>
         </div>
 
         {resident.familyMembers?.length > 0 && (
@@ -548,6 +562,23 @@ const DocumentViewer = ({ resident, token, onClose }) => {
       }
     };
   }, [resident._id, token]);
+
+  return (
+    <FileViewerModal
+      title="Identification Document"
+      subtitle={`${resident.familyName} - ${originalName}`}
+      fileUrl={documentUrl}
+      downloadUrl={documentUrl}
+      downloadName={originalName}
+      isPdf={isPDF}
+      loading={loadingDocument}
+      error={documentError}
+      emptyMessage="No identification document is attached to this record."
+      onClose={onClose}
+    />
+  );
+
+  /*
   return (
     <div className="document-viewer-overlay" onClick={onClose}>
       <div className="document-viewer-container" onClick={e => e.stopPropagation()}>
@@ -579,11 +610,31 @@ const DocumentViewer = ({ resident, token, onClose }) => {
       </div>
     </div>
   );
+  */
 };
 
-const VehiclePhotoModal = ({ vehicle, onClose }) => {
-  const photoUrl = assetUrl(vehicle?.photo?.path || '');
+const VehiclePhotoModal = ({ vehicle, cachedPhoto, onClose }) => {
+  const hasAttachedPhoto = Boolean(vehicle?.photo?.path);
+  const photoUrl = cachedPhoto?.objectUrl || '';
+  const downloadUrl = photoUrl || cachedPhoto?.sourceUrl || '';
+  const isLoading = hasAttachedPhoto && cachedPhoto?.status !== 'loaded';
+  const hasError = hasAttachedPhoto && cachedPhoto?.status === 'error';
 
+  return (
+    <FileViewerModal
+      title="Vehicle Photo"
+      subtitle={`${vehicle?.plateNumber} - ${vehicle?.brand} ${vehicle?.model}`}
+      fileUrl={hasAttachedPhoto && !hasError && !isLoading ? photoUrl : ''}
+      downloadUrl={hasAttachedPhoto && !hasError && !isLoading ? downloadUrl : ''}
+      downloadName={vehicle?.photo?.originalName || `${vehicle?.plateNumber || 'vehicle'}-photo`}
+      loading={isLoading}
+      error={hasAttachedPhoto ? cachedPhoto?.error || '' : 'No vehicle photo is attached to this record.'}
+      emptyMessage="No vehicle photo is attached to this record."
+      onClose={onClose}
+    />
+  );
+
+  /*
   return (
     <div className="document-viewer-overlay" onClick={onClose}>
       <div className="document-viewer-container" onClick={(event) => event.stopPropagation()}>
@@ -591,11 +642,11 @@ const VehiclePhotoModal = ({ vehicle, onClose }) => {
           <div><h3>Vehicle Photo</h3><p>{vehicle?.plateNumber} - {vehicle?.brand} {vehicle?.model}</p></div>
           <div className="document-viewer-actions">
             <a
-              href={photoUrl || '#'}
+              href={downloadUrl || '#'}
               download={vehicle?.photo?.originalName || `${vehicle?.plateNumber || 'vehicle'}-photo`}
               className="btn-download"
               onClick={(event) => {
-                if (!photoUrl) {
+                if (!downloadUrl) {
                   event.preventDefault();
                 }
               }}
@@ -606,13 +657,32 @@ const VehiclePhotoModal = ({ vehicle, onClose }) => {
           </div>
         </div>
         <div className="document-viewer-content">
-          {photoUrl
-            ? <img src={photoUrl} alt={`${vehicle?.plateNumber || 'Vehicle'} registration`} className="document-viewer-image" />
-            : <div className="document-viewer-message document-viewer-error"><AlertCircle size={28} /><p>No vehicle photo is attached to this record.</p></div>}
+          {!hasAttachedPhoto ? (
+            <div className="document-viewer-message document-viewer-error">
+              <AlertCircle size={28} />
+              <p>No vehicle photo is attached to this record.</p>
+            </div>
+          ) : hasError ? (
+            <div className="document-viewer-message document-viewer-error">
+              <AlertCircle size={28} />
+              <p>{cachedPhoto?.error || 'Failed to load the vehicle photo.'}</p>
+              <button type="button" className="btn-view-document" onClick={() => onRetry?.(vehicle)}>
+                <Eye size={16} /> Retry
+              </button>
+            </div>
+          ) : isLoading ? (
+            <div className="document-viewer-message">
+              <div className="spinner"></div>
+              <p>Loading vehicle photo...</p>
+            </div>
+          ) : (
+            <img src={photoUrl} alt={`${vehicle?.plateNumber || 'Vehicle'} registration`} className="document-viewer-image" />
+          )}
         </div>
       </div>
     </div>
   );
+  */
 };
 
   const ScrollableTableWrapper = ({ children }) => {
@@ -717,6 +787,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const [residentModalMode, setResidentModalMode] = useState('view');
   const [viewingFamilyMembers, setViewingFamilyMembers] = useState(null);
   const [viewingVehicle, setViewingVehicle] = useState(null);
+  const [vehiclePhotoCache, setVehiclePhotoCache] = useState({});
   const [allVehicles, setAllVehicles]           = useState([]);
   const [pendingResidentsPage, setPendingResidentsPage] = useState(1);
   const [approvedResidentsPage, setApprovedResidentsPage] = useState(1);
@@ -737,11 +808,18 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const [residentLoadingCount, setResidentLoadingCount] = useState(0);
   const [residentMutation, setResidentMutation] = useState({ id: '', action: '' });
   const lastTrackedModuleRef = useRef('');
+  const vehiclePhotoCacheRef = useRef({});
+  const vehiclePhotoLoadControllersRef = useRef({});
   const residentLoading = residentLoadingCount > 0;
 
   const openResidentModal = useCallback((resident, mode = 'view') => {
     setResidentModalMode(mode);
     setViewingResident(resident);
+  }, []);
+  const openResidentDocument = useCallback((resident) => {
+    setResidentModalMode('view');
+    setViewingResident(null);
+    setViewingDocument(resident);
   }, []);
 
   const [sessionUser, setSessionUser] = useState(() => JSON.parse(localStorage.getItem('user') || '{}'));
@@ -758,6 +836,118 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
   const endResidentLoading = useCallback(() => {
     setResidentLoadingCount((currentCount) => Math.max(0, currentCount - 1));
   }, []);
+
+  useEffect(() => {
+    vehiclePhotoCacheRef.current = vehiclePhotoCache;
+  }, [vehiclePhotoCache]);
+
+  useEffect(() => () => {
+    Object.values(vehiclePhotoLoadControllersRef.current).forEach((controller) => controller?.abort?.());
+    Object.values(vehiclePhotoCacheRef.current).forEach((entry) => {
+      if (entry?.objectUrl) {
+        URL.revokeObjectURL(entry.objectUrl);
+      }
+    });
+  }, []);
+
+  const preloadVehiclePhoto = useCallback((vehicle) => {
+    if (!vehicle?.photo?.path || !vehicle?.ownerId || !vehicle?._id || !token) {
+      return;
+    }
+
+    const cacheKey = getVehiclePhotoCacheKey(vehicle);
+    const sourceUrl = getVehiclePhotoFileUrl(vehicle);
+    const cachedPhoto = vehiclePhotoCacheRef.current[cacheKey];
+
+    if (
+      cachedPhoto?.sourceUrl === sourceUrl &&
+      (cachedPhoto.status === 'loading' || cachedPhoto.status === 'loaded')
+    ) {
+      return;
+    }
+
+    vehiclePhotoLoadControllersRef.current[cacheKey]?.abort?.();
+
+    if (cachedPhoto?.objectUrl && cachedPhoto.sourceUrl !== sourceUrl) {
+      URL.revokeObjectURL(cachedPhoto.objectUrl);
+    }
+
+    setVehiclePhotoCache((currentCache) => ({
+      ...currentCache,
+      [cacheKey]: {
+        sourceUrl,
+        objectUrl: '',
+        status: 'loading',
+        error: ''
+      }
+    }));
+
+    const controller = new AbortController();
+    vehiclePhotoLoadControllersRef.current[cacheKey] = controller;
+
+    fetch(sourceUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+      signal: controller.signal
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error('Failed to load vehicle photo.');
+        }
+
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const latestCachedPhoto = vehiclePhotoCacheRef.current[cacheKey];
+
+        if (latestCachedPhoto?.objectUrl && latestCachedPhoto.objectUrl !== objectUrl) {
+          URL.revokeObjectURL(latestCachedPhoto.objectUrl);
+        }
+
+        setVehiclePhotoCache((currentCache) => ({
+          ...currentCache,
+          [cacheKey]: {
+            sourceUrl,
+            objectUrl,
+            status: 'loaded',
+            error: ''
+          }
+        }));
+      })
+      .catch((error) => {
+        if (error.name === 'AbortError') {
+          return;
+        }
+
+        setVehiclePhotoCache((currentCache) => ({
+          ...currentCache,
+          [cacheKey]: {
+            sourceUrl,
+            objectUrl: '',
+            status: 'error',
+            error: error.message || 'Failed to load vehicle photo.'
+          }
+        }));
+      })
+      .finally(() => {
+        if (vehiclePhotoLoadControllersRef.current[cacheKey] === controller) {
+          delete vehiclePhotoLoadControllersRef.current[cacheKey];
+        }
+      });
+  }, [token]);
+
+  const openVehiclePhoto = useCallback((vehicle) => {
+    if (!vehicle?.photo?.path) {
+      showAlert('No vehicle photo is attached to this record.', 'error');
+      return;
+    }
+
+    preloadVehiclePhoto(vehicle);
+    setViewingVehicle(vehicle);
+  }, [preloadVehiclePhoto, showAlert]);
+
+  useEffect(() => {
+    allVehicles.forEach((vehicle) => preloadVehiclePhoto(vehicle));
+  }, [allVehicles, preloadVehiclePhoto]);
 
   const syncCurrentUser = useCallback(async () => {
     if (!token) return;
@@ -1365,7 +1555,16 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
               <FamilyCountCell resident={resident} />
                 <td>{formatResidentDate(resident.createdAt, 'Unknown')}</td>
                 <td onClick={e => e.stopPropagation()}>
-                  <button onClick={() => setViewingDocument(resident)} className="btn-view-document btn-view-document-sm"><Eye size={14} /> View</button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openResidentDocument(resident);
+                    }}
+                    className="btn-view-document btn-view-document-sm"
+                  >
+                    <Eye size={14} /> View
+                  </button>
                 </td>
                 <td onClick={e => e.stopPropagation()}>
                   <div className="table-actions">
@@ -1398,7 +1597,16 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
               <FamilyCountCell resident={resident} />
               <td>{formatResidentDate(resident.createdAt, 'Unknown')}</td>
               <td onClick={e => e.stopPropagation()}>
-                <button onClick={() => setViewingDocument(resident)} className="btn-view-document btn-view-document-sm"><Eye size={14} /> View</button>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openResidentDocument(resident);
+                  }}
+                  className="btn-view-document btn-view-document-sm"
+                >
+                  <Eye size={14} /> View
+                </button>
               </td>
               <td onClick={e => e.stopPropagation()}>
                 <div className="table-actions">
@@ -1431,7 +1639,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
               <td>{vehicle.ownerPhone}</td>
               <td onClick={(event) => event.stopPropagation()}>
                 {vehicle.photo?.path ? (
-                  <button onClick={() => setViewingVehicle(vehicle)} className="btn-view-document btn-view-document-sm"><Eye size={14} /> View</button>
+                  <button onClick={() => openVehiclePhoto(vehicle)} className="btn-view-document btn-view-document-sm"><Eye size={14} /> View</button>
                 ) : (
                   <span className="table-empty">-</span>
                 )}
@@ -1785,35 +1993,6 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
         )}
 
         {/* Modals — now stable references since they're defined outside */}
-        {viewingResident && (
-          <ResidentDetailModal
-            resident={viewingResident}
-            onClose={() => {
-              setViewingResident(null);
-              setResidentModalMode('view');
-            }}
-            isPending={!viewingResident.isApproved}
-            onApprove={approveResident}
-            onReject={rejectResident}
-            onApproveRenewal={approveResidentRenewal}
-            onRejectRenewal={rejectResidentRenewal}
-            onViewDocument={setViewingDocument}
-            onUpdateResident={updateResidentAccount}
-            onDeleteResident={deleteResidentAccount}
-            isUpdatingResident={residentMutation.id === viewingResident._id && residentMutation.action === 'update'}
-            isDeletingResident={residentMutation.id === viewingResident._id && residentMutation.action === 'delete'}
-            startInEditMode={residentModalMode === 'edit'}
-          />
-        )}
-        {viewingDocument && (
-          <DocumentViewer resident={viewingDocument} token={token} onClose={() => setViewingDocument(null)} />
-        )}
-        {viewingFamilyMembers && (
-          <FamilyMembersModal resident={viewingFamilyMembers} onClose={() => setViewingFamilyMembers(null)} />
-        )}
-        {viewingVehicle && (
-          <VehiclePhotoModal vehicle={viewingVehicle} onClose={() => setViewingVehicle(null)} />
-        )}
       </div>
     );
   };
@@ -1860,7 +2039,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
                             <div className="vehicle-detail"><span className="detail-label">Registered:</span><span className="detail-value">{new Date(vehicle.registeredDate).toLocaleDateString()}</span></div>
                           </div>
                           {vehicle.photo?.path && (
-                            <button className="btn-view-document" onClick={() => setViewingVehicle(vehicle)}>
+                            <button className="btn-view-document" onClick={() => openVehiclePhoto(vehicle)}>
                               <Eye size={16} /> View Uploaded Photo
                             </button>
                           )}
@@ -2102,7 +2281,7 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
                         <div key={index} className="pre-reg-companion-item">
                           <strong>{companion.firstName} {companion.lastName}</strong>
                           <span>{companion.relationshipToResident}</span>
-                          <span>ID: {companion.identification}</span>
+                          <span>{companion.identificationDocument?.path ? 'Identification file uploaded' : (companion.identification ? `ID: ${companion.identification}` : 'No identification file')}</span>
                         </div>
                       ))}
                     </div>
@@ -2225,6 +2404,39 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
             {renderContent()}
           </div>
         </div>
+        {viewingResident && (
+          <ResidentDetailModal
+            resident={viewingResident}
+            onClose={() => {
+              setViewingResident(null);
+              setResidentModalMode('view');
+            }}
+            isPending={!viewingResident.isApproved}
+            onApprove={approveResident}
+            onReject={rejectResident}
+            onApproveRenewal={approveResidentRenewal}
+            onRejectRenewal={rejectResidentRenewal}
+            onViewDocument={openResidentDocument}
+            onUpdateResident={updateResidentAccount}
+            onDeleteResident={deleteResidentAccount}
+            isUpdatingResident={residentMutation.id === viewingResident._id && residentMutation.action === 'update'}
+            isDeletingResident={residentMutation.id === viewingResident._id && residentMutation.action === 'delete'}
+            startInEditMode={residentModalMode === 'edit'}
+          />
+        )}
+        {viewingDocument && (
+          <DocumentViewer resident={viewingDocument} token={token} onClose={() => setViewingDocument(null)} />
+        )}
+        {viewingFamilyMembers && (
+          <FamilyMembersModal resident={viewingFamilyMembers} onClose={() => setViewingFamilyMembers(null)} />
+        )}
+        {viewingVehicle && (
+          <VehiclePhotoModal
+            vehicle={viewingVehicle}
+            cachedPhoto={vehiclePhotoCache[getVehiclePhotoCacheKey(viewingVehicle)]}
+            onClose={() => setViewingVehicle(null)}
+          />
+        )}
         {viewingVisitorIdentification && (
           <VisitorIdentificationModal
             visitor={viewingVisitorIdentification}

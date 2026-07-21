@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiUrl } from '../../utils/api';
-import { AlertCircle, Download, Eye, FileText, LayoutGrid, Pencil, Table2, Upload, XCircle } from 'lucide-react';
+import { Download, Eye, FileText, LayoutGrid, Pencil, Table2, Upload, XCircle } from 'lucide-react';
 import PaginationControls from '../common/PaginationControls';
 import { buildPaginatedUrl, parsePaginatedResponse } from '../../utils/pagination';
+import FileViewerModal from '../common/FileViewerModal';
 import {
   DOCUMENT_UPLOAD_MAX_BYTES,
   formatFileSize,
@@ -475,23 +476,18 @@ const ResidentDocumentsManagement = ({ token, showAlert }) => {
       <PaginationControls pagination={pagination} onPageChange={setPage} />
 
       {previewFile && (
-        <div className="resident-doc-preview-modal" onClick={closePreview}>
-          <div className="resident-doc-preview-card" onClick={(event) => event.stopPropagation()}>
-            <div className="resident-doc-preview-card-head">
-              <h3>{previewFile.originalName || 'Resident Document'}</h3>
-              <button onClick={closePreview}><XCircle size={16} /></button>
-            </div>
-            {previewLoading ? (
-              <div className="resident-doc-preview-message"><FileText size={28} /><p>Loading document...</p></div>
-            ) : previewError ? (
-              <div className="resident-doc-preview-message resident-doc-preview-error"><AlertCircle size={28} /><p>{previewError}</p></div>
-            ) : previewFile.mimetype === 'application/pdf' ? (
-              <iframe title="Resident Document" src={previewUrl} className="resident-doc-preview-frame" />
-            ) : (
-              <img src={previewUrl} alt="Resident Document" className="resident-doc-preview-image" />
-            )}
-          </div>
-        </div>
+        <FileViewerModal
+          title="Resident Document"
+          subtitle={previewFile.originalName || 'Resident document'}
+          fileUrl={previewUrl}
+          downloadUrl={previewUrl}
+          downloadName={previewFile.originalName || 'resident-document'}
+          isPdf={previewFile.mimetype === 'application/pdf'}
+          loading={previewLoading}
+          error={previewError}
+          emptyMessage="No resident document is available."
+          onClose={closePreview}
+        />
       )}
     </div>
   );

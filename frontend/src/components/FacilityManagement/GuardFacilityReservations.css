@@ -133,10 +133,47 @@
 }
 
 .guard-facility-qr-video {
-  width: min(100%, 480px);
+  width: min(100%, 560px);
   border-radius: var(--radius-xl);
   border: 1px solid var(--gray-100);
   background: #020617;
+  aspect-ratio: 4 / 3;
+}
+
+.guard-facility-qr-reader {
+  display: none;
+  overflow: hidden;
+  width: min(100%, 560px);
+  min-height: 420px;
+  position: relative;
+  border-radius: var(--radius-xl);
+  background: #020617;
+  margin-top: 1rem;
+}
+
+.guard-facility-qr-reader.active {
+  display: block;
+}
+
+.guard-facility-qr-reader video,
+.guard-facility-qr-reader canvas,
+.guard-facility-qr-reader img {
+  width: 100% !important;
+  height: 100% !important;
+  max-height: none;
+  object-fit: contain;
+  border-radius: var(--radius-xl);
+}
+
+.guard-facility-qr-reader > video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+  background: #020617;
+}
+
+.guard-facility-qr-reader > canvas {
+  display: none !important;
 }
 
 .guard-facility-toolbar {
