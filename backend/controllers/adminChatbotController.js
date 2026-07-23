@@ -7,7 +7,7 @@ const Complaint = require('../models/Complaint');
 const { appendResidentComputedFields } = require('../utils/residentAccounts');
 
 const OPENAI_API_URL = 'https://api.openai.com/v1/responses';
-const DEFAULT_CHATBOT_MODEL = process.env.OPENAI_MODEL || 'gpt-5.4-mini';
+const DEFAULT_CHATBOT_MODEL = process.env.OPENAI_MODEL || 'gpt-5-mini';
 const MAX_MESSAGE_LENGTH = 1500;
 const MAX_HISTORY_ITEMS = 6;
 const MAX_MATCHED_RECORDS = 6;
@@ -69,6 +69,81 @@ const normalizeText = (value) => String(value || '').trim();
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+const extractQuotedPhrases = (value) => {
+  const matches = String(value || '').match(/"([^"]+)"|'([^']+)'/g) || [];
+  return matches
+    .map((match) => match.replace(/^['"]|['"]$/g, '').trim())
+    .filter(Boolean);
+};
+
+const cleanLookupSubject = (value) =>
+  normalizeText(value)
+    .replace(/^[:\-–—,\s]+/, '')
+    .replace(/^(resident|renter|family\s+name|surname|last\s+name)\s+(info|information|data|details)\s+(for|on|about)\s+/i, '')
+    .replace(/^(info|information|data|details)\s+(for|on|about)\s+/i, '')
+    .replace(/^(for|on|about)\s+/i, '')
+    .replace(/^(resident|renter|family\s+name|surname|last\s+name)\s*[:\-]?\s*/i, '')
+    .replace(/[?.!]+$/g, '')
+    .trim();
+
+const extractLookupIntent = (message) => {
+  const normalizedMessage = normalizeText(message);
+  const quotedSubjects = extractQuotedPhrases(normalizedMessage);
+  const patterns = [
+    {
+      entityType: 'renter',
+      regex: /(?:please\s+)?(?:get|show|find|search|give(?:\s+me)?)?\s*(?:data|info|information|record|records|details)?\s*(?:for|on|about)?\s*renter[s]?\s*:?\s*(.+)?$/i
+    },
+    {
+      entityType: 'resident',
+      regex: /(?:please\s+)?(?:get|show|find|search|give(?:\s+me)?)?\s*(?:data|info|information|record|records|details)?\s*(?:for|on|about)?\s*resident[s]?\s*:?\s*(.+)?$/i
+    },
+    {
+      entityType: 'resident',
+      regex: /(?:please\s+)?(?:give(?:\s+me)?\s+)?(?:info|information|data|details)\s*(?:for|on|about)\s*:?\s*(.+)$/i
+    },
+    {
+      entityType: 'resident',
+      regex: /(?:please\s+)?give(?:\s+me)?\s+(?:resident\s+)?(?:info|information|data|details)\s*(?:for|on|about)?\s*:?\s*(.+)$/i
+    },
+    {
+      entityType: 'resident',
+      regex: /(?:please\s+)?(?:give(?:\s+me)?|show|get|find)\s+(?:me\s+)?details\s*(?:for|on|about)\s*:?\s*(.+)$/i
+    },
+    {
+      entityType: 'resident',
+      regex: /(?:please\s+)?(?:resident\s+)?(?:info|information|data|details)\s*:?\s*(.+)$/i
+    }
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalizedMessage.match(pattern.regex);
+    if (!match) {
+      continue;
+    }
+
+    return {
+      entityType: pattern.entityType,
+      subject: cleanLookupSubject(match[1] || quotedSubjects[0] || ''),
+      quotedSubjects
+    };
+  }
+
+  return {
+    entityType: quotedSubjects.length > 0
+      ? (
+          /\brenter[s]?\b/i.test(normalizedMessage)
+            ? 'renter'
+            : /\bresident[s]?\b/i.test(normalizedMessage)
+              ? 'resident'
+              : ''
+        )
+      : '',
+    subject: cleanLookupSubject(quotedSubjects[0] || ''),
+    quotedSubjects
+  };
+};
+
 const isSystemRelatedText = (value) => {
   const text = normalizeText(value);
   return Boolean(text && SYSTEM_TOPIC_PATTERNS.some((pattern) => pattern.test(text)));
@@ -92,8 +167,8 @@ const isSystemRelatedMessage = (message, history = []) => {
   return isFollowUp && recentHistoryIsSystemRelated;
 };
 
-const buildQueryRegex = (message) => {
-  const normalized = normalizeText(message).toLowerCase();
+const buildQueryRegex = (message, queryIntent = {}) => {
+  const normalized = normalizeText(queryIntent.subject || message).toLowerCase();
 
   if (!normalized) {
     return null;
@@ -102,7 +177,10 @@ const buildQueryRegex = (message) => {
   const stopWords = new Set([
     'the', 'and', 'for', 'with', 'that', 'this', 'from', 'have', 'what', 'how',
     'many', 'show', 'about', 'please', 'give', 'tell', 'need', 'want', 'into',
-    'which', 'who', 'where', 'when', 'are', 'our', 'your', 'their', 'than'
+    'which', 'who', 'where', 'when', 'are', 'our', 'your', 'their', 'than',
+    'resident', 'residents', 'renter', 'renters', 'data', 'info', 'information',
+    'record', 'records', 'details', 'get', 'find', 'search', 'family', 'name',
+    'surname', 'last'
   ]);
 
   const terms = normalized
@@ -129,8 +207,21 @@ const buildHistoryBlock = (history = []) =>
 const buildResidentAddress = (resident) =>
   [resident.houseAddress, resident.street].filter(Boolean).join(', ');
 
+const buildResidentVehicles = (resident = {}) =>
+  (Array.isArray(resident.vehicles) ? resident.vehicles : [])
+    .filter((vehicle) => !vehicle?.deletedAt)
+    .slice(0, 5)
+    .map((vehicle) => ({
+      plateNumber: vehicle.plateNumber || '',
+      vehicleType: vehicle.vehicleType || '',
+      brand: vehicle.brand || '',
+      model: vehicle.model || '',
+      color: vehicle.color || ''
+    }));
+
 const buildResidentSummary = (resident) => {
   const residentSnapshot = appendResidentComputedFields(resident);
+  const vehicles = buildResidentVehicles(residentSnapshot);
 
   return {
     familyName: residentSnapshot.familyName,
@@ -141,13 +232,20 @@ const buildResidentSummary = (resident) => {
     propertyType: residentSnapshot.propertyType,
     occupancyType: residentSnapshot.occupancyType,
     accountStatus: residentSnapshot.accountStatusLabel,
+    renewalStatus: residentSnapshot.renewalStatus || 'not_applicable',
     approved: Boolean(residentSnapshot.isApproved),
-    expiresAt: residentSnapshot.expiresAt || null
+    expiresAt: residentSnapshot.expiresAt || null,
+    occupancyStartDate: residentSnapshot.occupancyStartDate || null,
+    occupancyEndDate: residentSnapshot.occupancyEndDate || null,
+    memberCount: Array.isArray(residentSnapshot.familyMembers) ? residentSnapshot.familyMembers.length : 0,
+    vehicleCount: vehicles.length,
+    vehicles
   };
 };
 
 const buildChatContext = async (message) => {
-  const queryRegex = buildQueryRegex(message);
+  const queryIntent = extractLookupIntent(message);
+  const queryRegex = buildQueryRegex(message, queryIntent);
   const now = new Date();
   const todayStart = new Date(now);
   todayStart.setHours(0, 0, 0, 0);
@@ -185,21 +283,32 @@ const buildChatContext = async (message) => {
     User.countDocuments({ isApproved: true, deletedAt: null, occupancyType: 'renter' }),
     User.countDocuments({ isApproved: true, deletedAt: null, occupancyType: 'renter', expiresAt: { $lt: now } }),
     EntryLog.countDocuments({ timestamp: { $gte: todayStart } }),
-    queryRegex
+    (queryRegex || queryIntent.entityType === 'renter')
       ? User.find({
           deletedAt: null,
-          $or: [
-            { familyName: queryRegex },
-            { username: queryRegex },
-            { email: queryRegex },
-            { phoneNumber: queryRegex },
-            { houseAddress: queryRegex },
-            { street: queryRegex },
-            { buildingName: queryRegex },
-            { unitNumber: queryRegex }
-          ]
+          ...(queryIntent.entityType === 'renter' ? { occupancyType: 'renter' } : {}),
+          ...(queryRegex
+            ? {
+                $or: [
+                  { familyName: queryRegex },
+                  { username: queryRegex },
+                  { email: queryRegex },
+                  { phoneNumber: queryRegex },
+                  { houseAddress: queryRegex },
+                  { street: queryRegex },
+                  { buildingName: queryRegex },
+                  { unitNumber: queryRegex },
+                  { 'familyMembers.firstName': queryRegex },
+                  { 'familyMembers.lastName': queryRegex },
+                  { 'vehicles.plateNumber': queryRegex },
+                  { 'vehicles.brand': queryRegex },
+                  { 'vehicles.model': queryRegex },
+                  { 'vehicles.color': queryRegex }
+                ]
+              }
+            : {})
         })
-          .select('familyName username email phoneNumber houseAddress street propertyType occupancyType isApproved expiresAt')
+          .select('familyName username email phoneNumber houseAddress street propertyType occupancyType isApproved expiresAt vehicles familyMembers renewalStatus occupancyStartDate occupancyEndDate block lot phase buildingName unitNumber')
           .limit(MAX_MATCHED_RECORDS)
           .lean()
       : Promise.resolve([]),
@@ -313,6 +422,11 @@ const buildChatContext = async (message) => {
   );
 
   return {
+    queryIntent: {
+      entityType: queryIntent.entityType || '',
+      subject: queryIntent.subject || '',
+      quotedSubjects: queryIntent.quotedSubjects || []
+    },
     snapshot: {
       totalApprovedResidents,
       totalPendingResidents,
@@ -521,6 +635,8 @@ const askAdminChatbot = async (req, res) => {
           'Only answer questions related to the EcoTrend HOA system and its modules.',
           `If a question is outside the system scope, answer exactly: "${SYSTEM_ONLY_REPLY}"`,
           'Answer only using the grounded HOA data provided in the prompt.',
+          'Treat queries such as resident "name", renter "name", get data for resident: name, and info on name as record lookups.',
+          'If the admin asks for resident or renter data, lead with directly matched resident records before any general summary.',
           'Do not invent resident names, counts, dates, addresses, statuses, or actions.',
           'If the answer is not present in the provided data, say that the information is unavailable in the current system context.',
           'Be concise, practical, and admin-focused.',
@@ -565,3 +681,4 @@ const askAdminChatbot = async (req, res) => {
 module.exports = {
   askAdminChatbot
 };
+

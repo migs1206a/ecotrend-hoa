@@ -2404,6 +2404,14 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
             {renderContent()}
           </div>
         </div>
+        {canAccessModule('ai_chatbot') && activeModule !== 'ai_chatbot' && (
+          <AdminAIChatbotModule
+            token={token}
+            showAlert={showAlert}
+            mode="dock"
+            onExpand={() => setActiveModule('ai_chatbot')}
+          />
+        )}
         {viewingResident && (
           <ResidentDetailModal
             resident={viewingResident}

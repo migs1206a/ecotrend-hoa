@@ -4,9 +4,12 @@ import {
   AlertCircle,
   Bot,
   FileSearch,
+  Maximize2,
+  MessageSquare,
   SendHorizontal,
   Trash2,
-  Users
+  Users,
+  X
 } from 'lucide-react';
 import { apiUrl } from '../../utils/api';
 import './AdminAIChatbotModule.css';
@@ -16,24 +19,30 @@ const INITIAL_MESSAGES = [
     id: 'assistant-welcome',
     role: 'assistant',
     content:
-      'Ask about resident counts, resident information, gate activity, visitor behavior, complaints, or facility activity. I only answer from the current HOA system data.'
+      'Ask about resident counts, resident information, renter status, gate activity, visitor behavior, complaints, or facility activity. I only answer from the current HOA system data.',
+    createdAt: '2026-07-21T08:00:00+08:00'
   }
 ];
 
+const CHAT_STORAGE_KEY = 'ecotrend-admin-ai-chatbot-history-v2';
+
 const SUGGESTED_PROMPTS = [
   'How many approved residents do we currently have?',
+  'Resident "Dela Cruz" - show account data, address, and vehicles.',
+  'Renter "Santos" - show approval status and expiry details.',
   'Summarize the latest security concerns from entry logs, complaints, and visitors.',
   'Show me the latest gate activity and unusual access patterns.',
   'Which facilities are getting the most reservations lately?',
-  'Find resident information related to Dela Cruz.',
   'How many renters are currently expired or nearing expiry?'
 ];
+
+const DOCK_PROMPTS = SUGGESTED_PROMPTS.slice(0, 3);
 
 const CAPABILITIES = [
   {
     icon: Users,
     title: 'Resident lookup',
-    description: 'Check counts, household records, renter status, and approval-related details.'
+    description: 'Check counts, household records, renter status, approval details, and attached vehicles.'
   },
   {
     icon: Activity,
@@ -47,12 +56,43 @@ const CAPABILITIES = [
   }
 ];
 
+const QUICK_PATTERNS = [
+  'Resident "Family Name"',
+  'Renter "Family Name"',
+  'Get data for resident: Family Name',
+  'Info on "Resident Name"'
+];
+
 const createMessage = (role, content, extra = {}) => ({
   id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   role,
   content,
   ...extra
 });
+
+const readStoredMessages = () => {
+  if (typeof window === 'undefined') {
+    return INITIAL_MESSAGES;
+  }
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(CHAT_STORAGE_KEY) || '[]');
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return INITIAL_MESSAGES;
+    }
+
+    const validMessages = parsed.filter(
+      (item) =>
+        item &&
+        ['assistant', 'user'].includes(String(item.role || '').toLowerCase()) &&
+        String(item.content || '').trim()
+    );
+
+    return validMessages.length > 0 ? validMessages : INITIAL_MESSAGES;
+  } catch (error) {
+    return INITIAL_MESSAGES;
+  }
+};
 
 const formatTime = (value) => {
   const date = new Date(value);
@@ -61,17 +101,25 @@ const formatTime = (value) => {
     : date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 };
 
-const AdminAIChatbotModule = ({ token, showAlert }) => {
-  const [messages, setMessages] = useState(INITIAL_MESSAGES);
+const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => {
+  const [messages, setMessages] = useState(() => readStoredMessages());
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [dockOpen, setDockOpen] = useState(false);
   const threadRef = useRef(null);
+  const isDock = mode === 'dock';
 
   useEffect(() => {
-    if (threadRef.current) {
+    if (threadRef.current && (!isDock || dockOpen)) {
       threadRef.current.scrollTop = threadRef.current.scrollHeight;
     }
-  }, [messages, sending]);
+  }, [dockOpen, isDock, messages, sending]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
+    }
+  }, [messages]);
 
   const promptCountLabel = useMemo(
     () => `${SUGGESTED_PROMPTS.length} quick prompts`,
@@ -152,10 +200,6 @@ const AdminAIChatbotModule = ({ token, showAlert }) => {
     }
   };
 
-  const handlePromptClick = (prompt) => {
-    sendMessage(prompt);
-  };
-
   const clearConversation = () => {
     if (sending) {
       return;
@@ -164,6 +208,194 @@ const AdminAIChatbotModule = ({ token, showAlert }) => {
     setMessages(INITIAL_MESSAGES);
     setInput('');
   };
+
+  const renderPromptList = (compact = false) => (
+    <div className={`admin-ai-chatbot__prompt-list ${compact ? 'is-compact' : ''}`}>
+      {SUGGESTED_PROMPTS.map((prompt) => (
+        <button
+          key={prompt}
+          type="button"
+          className="admin-ai-chatbot__prompt"
+          onClick={() => sendMessage(prompt)}
+          disabled={sending}
+        >
+          <span>{prompt}</span>
+          <SendHorizontal size={14} />
+        </button>
+      ))}
+    </div>
+  );
+
+  const renderDockPromptList = () => (
+    <div className="admin-ai-chatbot-dock__prompt-list">
+      {DOCK_PROMPTS.map((prompt) => (
+        <button
+          key={prompt}
+          type="button"
+          className="admin-ai-chatbot-dock__prompt"
+          onClick={() => sendMessage(prompt)}
+          disabled={sending}
+        >
+          <span>{prompt}</span>
+          <SendHorizontal size={14} />
+        </button>
+      ))}
+    </div>
+  );
+
+  const renderThread = () => (
+    <div className="admin-ai-chatbot__thread" ref={threadRef}>
+      {messages.map((message) => (
+        <article
+          key={message.id}
+          className={`admin-ai-chatbot__message admin-ai-chatbot__message--${message.role} ${
+            message.tone === 'error' ? 'is-error' : ''
+          }`}
+        >
+          <div className="admin-ai-chatbot__message-avatar">
+            {message.role === 'assistant' ? <Bot size={16} /> : <Users size={16} />}
+          </div>
+          <div className="admin-ai-chatbot__message-body">
+            <div className="admin-ai-chatbot__message-meta">
+              <strong>{message.role === 'assistant' ? 'AI Assistant' : 'You'}</strong>
+              {message.createdAt && <span>{formatTime(message.createdAt)}</span>}
+            </div>
+            <p>{message.content}</p>
+          </div>
+        </article>
+      ))}
+
+      {sending && (
+        <article className="admin-ai-chatbot__message admin-ai-chatbot__message--assistant is-pending">
+          <div className="admin-ai-chatbot__message-avatar">
+            <Bot size={16} />
+          </div>
+          <div className="admin-ai-chatbot__message-body">
+            <div className="admin-ai-chatbot__message-meta">
+              <strong>AI Assistant</strong>
+              <span>Thinking</span>
+            </div>
+            <div className="admin-ai-chatbot__typing">
+              <span />
+              <span />
+              <span />
+            </div>
+          </div>
+        </article>
+      )}
+    </div>
+  );
+
+  const renderComposer = (compact = false) => (
+    <div className={`admin-ai-chatbot__composer ${compact ? 'is-compact' : ''}`}>
+      <textarea
+        value={input}
+        onChange={(event) => setInput(event.target.value.slice(0, 1500))}
+        onKeyDown={handleKeyDown}
+        placeholder='Try: Resident "Dela Cruz" or Get data for resident: Santos'
+        rows={compact ? 2 : 4}
+        disabled={sending}
+      />
+      <div className="admin-ai-chatbot__composer-footer">
+        <span>{input.trim().length}/1500</span>
+        <button
+          type="button"
+          className="admin-ai-chatbot__send-btn"
+          onClick={() => sendMessage()}
+          disabled={!input.trim() || sending}
+        >
+          <SendHorizontal size={16} />
+          <span>{sending ? 'Sending...' : 'Send question'}</span>
+        </button>
+      </div>
+    </div>
+  );
+
+  if (isDock) {
+    return (
+      <div className={`admin-ai-chatbot-dock ${dockOpen ? 'is-open' : ''}`}>
+        {dockOpen && (
+          <button
+            type="button"
+            className="admin-ai-chatbot-dock__backdrop"
+            onClick={() => setDockOpen(false)}
+            aria-label="Close AI chatbot"
+          />
+        )}
+
+        <div className="admin-ai-chatbot-dock__shell">
+          {dockOpen && (
+            <section className="admin-ai-chatbot-dock__panel" aria-label="Admin AI Chatbot popup">
+              <div className="admin-ai-chatbot-dock__panel-head">
+                <div>
+                  <div className="admin-ai-chatbot__kicker">
+                    <Bot size={15} />
+                    <span>Admin AI Chatbot</span>
+                  </div>
+                  <p>Resident, renter, and security lookups without leaving the page.</p>
+                </div>
+                <div className="admin-ai-chatbot-dock__actions">
+                  <button
+                    type="button"
+                    className="admin-ai-chatbot-dock__icon-btn"
+                    onClick={() => {
+                      if (typeof onExpand === 'function') {
+                        onExpand();
+                      }
+                      setDockOpen(false);
+                    }}
+                    aria-label="Open full AI chatbot module"
+                  >
+                    <Maximize2 size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-ai-chatbot-dock__icon-btn"
+                    onClick={() => setDockOpen(false)}
+                    aria-label="Close AI chatbot popup"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="admin-ai-chatbot-dock__shortcut-row">
+                {QUICK_PATTERNS.map((pattern) => (
+                  <button
+                    key={pattern}
+                    type="button"
+                    className="admin-ai-chatbot-dock__shortcut"
+                    onClick={() => setInput(pattern)}
+                  >
+                    {pattern}
+                  </button>
+                ))}
+              </div>
+
+              {renderDockPromptList()}
+              {renderThread()}
+              {renderComposer(true)}
+            </section>
+          )}
+
+          <button
+            type="button"
+            className="admin-ai-chatbot-dock__launcher"
+            onClick={() => setDockOpen((current) => !current)}
+            aria-label={dockOpen ? 'Hide AI chatbot' : 'Show AI chatbot'}
+          >
+            <div className="admin-ai-chatbot-dock__launcher-icon">
+              <MessageSquare size={18} />
+            </div>
+            <div className="admin-ai-chatbot-dock__launcher-copy">
+              <strong>h-AI</strong>
+              <span>Need help?</span>
+            </div>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="admin-ai-chatbot">
@@ -178,10 +410,43 @@ const AdminAIChatbotModule = ({ token, showAlert }) => {
             This admin-only assistant reads the current resident, gate, complaint, and facility data
             already stored in your portal, then replies in a concise operational format.
           </p>
+          <div className="admin-ai-chatbot__shortcut-row">
+            {QUICK_PATTERNS.map((pattern) => (
+              <button
+                key={pattern}
+                type="button"
+                className="admin-ai-chatbot__shortcut"
+                onClick={() => setInput(pattern)}
+              >
+                {pattern}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       <div className="admin-ai-chatbot__workspace">
+        <section className="admin-ai-chatbot__conversation">
+          <div className="admin-ai-chatbot__conversation-head">
+            <div>
+              <h3>Conversation</h3>
+              <p>Use direct prompts like resident names, renter checks, and gate summaries.</p>
+            </div>
+            <button
+              type="button"
+              className="admin-ai-chatbot__clear-btn"
+              onClick={clearConversation}
+              disabled={sending}
+            >
+              <Trash2 size={15} />
+              <span>Clear chat</span>
+            </button>
+          </div>
+
+          {renderThread()}
+          {renderComposer()}
+        </section>
+
         <aside className="admin-ai-chatbot__sidebar">
           <div className="admin-ai-chatbot__panel">
             <div className="admin-ai-chatbot__panel-head">
@@ -192,20 +457,7 @@ const AdminAIChatbotModule = ({ token, showAlert }) => {
               <span className="admin-ai-chatbot__pill">{promptCountLabel}</span>
             </div>
 
-            <div className="admin-ai-chatbot__prompt-list">
-              {SUGGESTED_PROMPTS.map((prompt) => (
-                <button
-                  key={prompt}
-                  type="button"
-                  className="admin-ai-chatbot__prompt"
-                  onClick={() => handlePromptClick(prompt)}
-                  disabled={sending}
-                >
-                  <span>{prompt}</span>
-                  <SendHorizontal size={14} />
-                </button>
-              ))}
-            </div>
+            {renderPromptList()}
           </div>
 
           <div className="admin-ai-chatbot__panel">
@@ -243,88 +495,6 @@ const AdminAIChatbotModule = ({ token, showAlert }) => {
             </div>
           </div>
         </aside>
-
-        <section className="admin-ai-chatbot__conversation">
-          <div className="admin-ai-chatbot__conversation-head">
-            <div>
-              <h3>Conversation</h3>
-              <p>Use short questions for the fastest admin summaries.</p>
-            </div>
-            <button
-              type="button"
-              className="admin-ai-chatbot__clear-btn"
-              onClick={clearConversation}
-              disabled={sending}
-            >
-              <Trash2 size={15} />
-              <span>Clear chat</span>
-            </button>
-          </div>
-
-          <div className="admin-ai-chatbot__thread" ref={threadRef}>
-            {messages.map((message) => (
-              <article
-                key={message.id}
-                className={`admin-ai-chatbot__message admin-ai-chatbot__message--${message.role} ${
-                  message.tone === 'error' ? 'is-error' : ''
-                }`}
-              >
-                <div className="admin-ai-chatbot__message-avatar">
-                  {message.role === 'assistant' ? <Bot size={16} /> : <Users size={16} />}
-                </div>
-                <div className="admin-ai-chatbot__message-body">
-                  <div className="admin-ai-chatbot__message-meta">
-                    <strong>{message.role === 'assistant' ? 'AI Assistant' : 'You'}</strong>
-                    {message.createdAt && <span>{formatTime(message.createdAt)}</span>}
-                  </div>
-                  <p>{message.content}</p>
-                </div>
-              </article>
-            ))}
-
-            {sending && (
-              <article className="admin-ai-chatbot__message admin-ai-chatbot__message--assistant is-pending">
-                <div className="admin-ai-chatbot__message-avatar">
-                  <Bot size={16} />
-                </div>
-                <div className="admin-ai-chatbot__message-body">
-                  <div className="admin-ai-chatbot__message-meta">
-                    <strong>AI Assistant</strong>
-                    <span>Thinking</span>
-                  </div>
-                  <div className="admin-ai-chatbot__typing">
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                </div>
-              </article>
-            )}
-          </div>
-
-          <div className="admin-ai-chatbot__composer">
-            <textarea
-              value={input}
-              onChange={(event) => setInput(event.target.value.slice(0, 1500))}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask about residents, gate activity, complaints, facility usage, or other admin summaries..."
-              rows={4}
-              disabled={sending}
-            />
-            <div className="admin-ai-chatbot__composer-footer">
-              <span>{input.trim().length}/1500</span>
-              <button
-                type="button"
-                className="admin-ai-chatbot__send-btn"
-                onClick={() => sendMessage()}
-                disabled={!input.trim() || sending}
-              >
-                <SendHorizontal size={16} />
-                <span>{sending ? 'Sending...' : 'Send question'}</span>
-              </button>
-            </div>
-          </div>
-        </section>
       </div>
     </div>
   );

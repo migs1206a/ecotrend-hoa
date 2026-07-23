@@ -13,6 +13,7 @@ Full-stack HOA management system.
 - Deploy the frontend as a static React build.
 - Use MongoDB Atlas for the production database.
 - Set production secrets through the host's environment variable settings. Do not commit `.env` files.
+- For the admin AI chatbot on Render, set `OPENAI_API_KEY` and optionally `OPENAI_MODEL` on the backend service, then redeploy.
 
 ## CCTV Relay
 
