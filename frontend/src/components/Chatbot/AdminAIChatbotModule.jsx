@@ -125,6 +125,11 @@ const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => 
     () => `${SUGGESTED_PROMPTS.length} quick prompts`,
     []
   );
+  const hasConversation = useMemo(
+    () => messages.some((message) => message.role === 'user'),
+    [messages]
+  );
+  const showDockSuggestions = !hasConversation && !sending;
 
   const sendMessage = async (messageOverride = '') => {
     const trimmedMessage = String(messageOverride || input).trim();
@@ -372,8 +377,8 @@ const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => 
                 ))}
               </div>
 
-              {renderDockPromptList()}
-              {renderThread()}
+              {showDockSuggestions ? renderDockPromptList() : null}
+              {hasConversation || sending ? renderThread() : null}
               {renderComposer(true)}
             </section>
           )}
@@ -501,3 +506,4 @@ const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => 
 };
 
 export default AdminAIChatbotModule;
+
