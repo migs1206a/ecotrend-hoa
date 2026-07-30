@@ -4,6 +4,8 @@
   justify-content: flex-end;
   gap: 0.75rem;
   margin-top: 1.2rem;
+  margin-bottom: 5.5rem;
+  padding-right: min(15rem, 34vw);
   flex-wrap: wrap;
   padding-top: 0.35rem;
 }
@@ -44,6 +46,8 @@
 @media (max-width: 640px) {
   .pagination-controls {
     justify-content: center;
+    margin-bottom: 5.25rem;
+    padding-right: 0;
   }
 
   .pagination-btn,
