@@ -118,6 +118,13 @@ const updateMonth = async (req, res) => {
     if (remarks !== undefined) monthRecord.remarks = remarks;
     if (paymentMethod !== undefined) monthRecord.paymentMethod = paymentMethod;
     if (paymentStatus !== undefined) monthRecord.paymentStatus = paymentStatus;
+    if (
+      (paid === false || ['none', 'pending', 'rejected'].includes(paymentStatus)) &&
+      monthRecord.adminReceipt?.path
+    ) {
+      await deleteStoredFile(monthRecord.adminReceipt);
+      monthRecord.adminReceipt = {};
+    }
 
     doc.markModified(`months.${upperMonth}`);
     await doc.save();
@@ -380,6 +387,10 @@ const uploadBillingReceipt = async (req, res) => {
     doc.months[upperMonth].paymentMethod = 'GCASH';
     doc.months[upperMonth].paymentStatus = 'pending';
     doc.months[upperMonth].paid = false;
+    if (doc.months[upperMonth].adminReceipt?.path) {
+      await deleteStoredFile(doc.months[upperMonth].adminReceipt);
+      doc.months[upperMonth].adminReceipt = {};
+    }
     doc.markModified(`months.${upperMonth}`);
     await doc.save();
 
@@ -387,6 +398,53 @@ const uploadBillingReceipt = async (req, res) => {
   } catch (err) {
     console.error('uploadBillingReceipt error:', err);
     res.status(500).json({ message: 'Failed to upload receipt' });
+  }
+};
+
+const uploadBillingAdminReceipt = async (req, res) => {
+  try {
+    if (!hasAdminModuleAccess(req.user, 'billing')) {
+      return res.status(403).json({ message: 'Only admins can upload issued receipts' });
+    }
+
+    const { residentId, year, month } = req.params;
+    const upperMonth = normalizeMonth(month);
+
+    if (!upperMonth) {
+      return res.status(400).json({ message: `Invalid month: ${month}` });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ message: 'No issued receipt file uploaded' });
+    }
+
+    const doc = await getOrCreate(residentId, parseInt(year, 10));
+    const monthRecord = doc.months[upperMonth];
+
+    if (!monthRecord.paid && monthRecord.paymentStatus !== 'verified') {
+      return res.status(400).json({ message: 'Payment must be verified before uploading the issued receipt' });
+    }
+
+    const existingReceipt = monthRecord.adminReceipt;
+    if (existingReceipt?.path) {
+      await deleteStoredFile(existingReceipt);
+    }
+
+    const storedReceipt = await storeUploadedFile(req.file, {
+      folder: 'ecotrend-hoa/issued-billing-receipts',
+      localDir: 'uploads/issued-billing-receipts',
+      prefix: 'issued-billing-receipt',
+      resourceType: req.file.mimetype === 'application/pdf' ? 'raw' : 'auto'
+    });
+
+    monthRecord.adminReceipt = storedReceipt;
+    doc.markModified(`months.${upperMonth}`);
+    await doc.save();
+
+    return res.json(doc);
+  } catch (err) {
+    console.error('uploadBillingAdminReceipt error:', err);
+    return res.status(500).json({ message: 'Failed to upload issued receipt' });
   }
 };
 
@@ -426,6 +484,11 @@ const reviewBillingReceipt = async (req, res) => {
       if (!monthRecord.datePaid) {
         monthRecord.datePaid = new Date().toISOString().slice(0, 10);
       }
+    }
+
+    if (paymentStatus !== 'verified' && monthRecord.adminReceipt?.path) {
+      await deleteStoredFile(monthRecord.adminReceipt);
+      monthRecord.adminReceipt = {};
     }
 
     if (paymentStatus === 'rejected') {
@@ -491,6 +554,7 @@ module.exports = {
   updateMonth,
   getSummary,
   uploadBillingReceipt,
+  uploadBillingAdminReceipt,
   reviewBillingReceipt,
   getBillingSettings,
   updateGcashQr,

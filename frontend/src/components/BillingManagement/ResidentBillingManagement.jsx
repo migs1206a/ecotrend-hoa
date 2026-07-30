@@ -27,7 +27,8 @@ const emptyMonths = () =>
       remarks: '',
       paymentMethod: '',
       paymentStatus: 'none',
-      receipt: {}
+      receipt: {},
+      adminReceipt: {}
     };
     return acc;
   }, {});
@@ -281,6 +282,7 @@ const ResidentBillingManagement = ({ token, userId, showAlert }) => {
                 <th>O.R. #</th>
                 <th>Date Paid</th>
                 <th>Receipt</th>
+                <th>Issued Receipt</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -299,8 +301,17 @@ const ResidentBillingManagement = ({ token, userId, showAlert }) => {
                     <td>{row.record.datePaid || '-'}</td>
                     <td>
                       {row.record.receipt?.path ? (
-                        <button className="resident-billing-view-btn" onClick={() => setViewingReceipt(row)}>
+                        <button className="resident-billing-view-btn" onClick={() => setViewingReceipt({ ...row, receiptKind: 'payment' })}>
                           <Eye size={13} /> View
+                        </button>
+                      ) : (
+                        '-'
+                      )}
+                    </td>
+                    <td>
+                      {row.record.adminReceipt?.path ? (
+                        <button className="resident-billing-view-btn" onClick={() => setViewingReceipt({ ...row, receiptKind: 'issued' })}>
+                          <Receipt size={13} /> View
                         </button>
                       ) : (
                         '-'
@@ -319,7 +330,7 @@ const ResidentBillingManagement = ({ token, userId, showAlert }) => {
                   </tr>
                   {selectedMonth === row.month && (
                     <tr className="resident-billing-upload-row">
-                      <td colSpan={7}>
+                      <td colSpan={8}>
                         <div className="resident-billing-upload-card">
                           <div className="resident-billing-upload-copy">
                             <h4>{row.label} Payment</h4>
@@ -362,12 +373,20 @@ const ResidentBillingManagement = ({ token, userId, showAlert }) => {
 
       {viewingReceipt && (
         <FileViewerModal
-          title={`${viewingReceipt.label} Receipt`}
-          subtitle={viewingReceipt.record.receipt.originalName || 'Resident receipt'}
-          fileUrl={assetUrl(viewingReceipt.record.receipt.path)}
-          downloadUrl={assetUrl(viewingReceipt.record.receipt.path)}
-          downloadName={viewingReceipt.record.receipt.originalName || `${viewingReceipt.label}-receipt`}
-          isPdf={viewingReceipt.record.receipt.mimetype === 'application/pdf'}
+          title={`${viewingReceipt.label} ${viewingReceipt.receiptKind === 'issued' ? 'Issued Receipt' : 'Payment Receipt'}`}
+          subtitle={
+            viewingReceipt.receiptKind === 'issued'
+              ? viewingReceipt.record.adminReceipt.originalName || 'Official HOA receipt'
+              : viewingReceipt.record.receipt.originalName || 'Resident receipt'
+          }
+          fileUrl={assetUrl(viewingReceipt.receiptKind === 'issued' ? viewingReceipt.record.adminReceipt.path : viewingReceipt.record.receipt.path)}
+          downloadUrl={assetUrl(viewingReceipt.receiptKind === 'issued' ? viewingReceipt.record.adminReceipt.path : viewingReceipt.record.receipt.path)}
+          downloadName={
+            viewingReceipt.receiptKind === 'issued'
+              ? viewingReceipt.record.adminReceipt.originalName || `${viewingReceipt.label}-official-receipt`
+              : viewingReceipt.record.receipt.originalName || `${viewingReceipt.label}-receipt`
+          }
+          isPdf={(viewingReceipt.receiptKind === 'issued' ? viewingReceipt.record.adminReceipt.mimetype : viewingReceipt.record.receipt.mimetype) === 'application/pdf'}
           onClose={() => setViewingReceipt(null)}
         />
       )}

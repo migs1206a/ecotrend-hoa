@@ -918,7 +918,8 @@
 
 .billing-btn-view,
 .billing-btn-verify,
-.billing-btn-reject {
+.billing-btn-reject,
+.billing-btn-upload-issued {
   padding: 0.45rem 0.7rem;
   font-size: 0.77rem;
 }
@@ -926,6 +927,37 @@
 .billing-btn-view {
   background: #eff6ff;
   color: #1d4ed8;
+}
+
+.billing-issued-receipt-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.billing-btn-upload-issued {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: #ecfdf5;
+  color: #047857;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 800;
+  transition: all 0.2s ease;
+}
+
+.billing-btn-upload-issued:hover {
+  background: #10b981;
+  color: var(--white);
+}
+
+.billing-btn-upload-issued input {
+  display: none;
 }
 
 .billing-btn-verify {

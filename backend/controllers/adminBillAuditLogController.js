@@ -2,6 +2,7 @@ const AdminBillAuditLog = require('../models/AdminBillAuditLog');
 const { parsePagination, sendPaginatedResponse } = require('../utils/pagination');
 const { buildBrandedReportPdf } = require('../utils/brandedPdf');
 const { buildDateRangeFilter, normalizeDateRange } = require('../utils/dateRange');
+const { storeUploadedFile, deleteStoredFile } = require('../utils/fileStorage');
 
 const buildActorSnapshot = (user = {}) => ({
   userId: String(user.userId || user.id || user._id || ''),
@@ -114,6 +115,7 @@ const buildBillAuditReportRows = (logs = []) =>
     paymentStatus: log.isPaid ? 'Paid' : 'Unpaid',
     paidDate: log.paidAt ? formatDateTime(log.paidAt) : '-',
     paidBy: log.isPaid ? getActorDisplayName(log.paidBy, 'Recorded as paid') : '-',
+    receipt: log.receipt?.path ? 'Uploaded' : '-',
     recordedBy: getActorDisplayName(log.createdBy),
     lastUpdated: formatDateTime(log.updatedAt || log.createdAt),
     notes: log.notes || '-'
@@ -144,6 +146,7 @@ const buildBillAuditPdf = (logs = [], generatedBy = 'ADMIN', coverage = {}) => {
       { key: 'paymentStatus', label: 'Status', width: 58, align: 'center' },
       { key: 'paidDate', label: 'Paid Date', width: 92 },
       { key: 'paidBy', label: 'Paid By', width: 90 },
+      { key: 'receipt', label: 'Receipt', width: 58, align: 'center' },
       { key: 'recordedBy', label: 'Recorded By', width: 88 },
       { key: 'lastUpdated', label: 'Last Updated', width: 92 },
       { key: 'notes', label: 'Notes', width: 120 }
@@ -285,6 +288,10 @@ const updateAdminBillAuditLogPaymentStatus = async (req, res) => {
     } else {
       log.paidAt = null;
       log.paidBy = {};
+      if (log.receipt?.path) {
+        await deleteStoredFile(log.receipt);
+      }
+      log.receipt = {};
     }
 
     await log.save();
@@ -295,12 +302,54 @@ const updateAdminBillAuditLogPaymentStatus = async (req, res) => {
   }
 };
 
+const uploadAdminBillAuditReceipt = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'No receipt file uploaded' });
+    }
+
+    const log = await AdminBillAuditLog.findById(req.params.id);
+
+    if (!log) {
+      return res.status(404).json({ message: 'Bill audit log not found' });
+    }
+
+    if (!log.isPaid) {
+      return res.status(400).json({ message: 'Mark this bill as paid before uploading a receipt' });
+    }
+
+    if (log.receipt?.path) {
+      await deleteStoredFile(log.receipt);
+    }
+
+    const storedReceipt = await storeUploadedFile(req.file, {
+      folder: 'ecotrend-hoa/admin-bill-receipts',
+      localDir: 'uploads/admin-bill-receipts',
+      prefix: 'admin-bill-receipt',
+      resourceType: req.file.mimetype === 'application/pdf' ? 'raw' : 'auto'
+    });
+
+    log.receipt = storedReceipt;
+    log.updatedBy = buildActorSnapshot(req.user);
+    await log.save();
+
+    return res.json(log);
+  } catch (error) {
+    console.error('uploadAdminBillAuditReceipt error:', error);
+    return res.status(500).json({ message: 'Failed to upload bill receipt' });
+  }
+};
+
 const deleteAdminBillAuditLog = async (req, res) => {
   try {
     const log = await AdminBillAuditLog.findByIdAndDelete(req.params.id);
 
     if (!log) {
       return res.status(404).json({ message: 'Bill audit log not found' });
+    }
+
+    if (log.receipt?.path) {
+      await deleteStoredFile(log.receipt);
     }
 
     return res.json({ message: 'Bill audit log deleted successfully' });
@@ -345,6 +394,7 @@ module.exports = {
   createAdminBillAuditLog,
   updateAdminBillAuditLog,
   updateAdminBillAuditLogPaymentStatus,
+  uploadAdminBillAuditReceipt,
   deleteAdminBillAuditLog,
   downloadAdminBillAuditLogsPdf
 };

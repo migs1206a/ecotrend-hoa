@@ -26,8 +26,10 @@ import {
 import './AdminBillingManagement.css';
 import FileViewerModal from '../common/FileViewerModal';
 import {
+  DOCUMENT_UPLOAD_MAX_BYTES,
   IMAGE_UPLOAD_MAX_BYTES,
   formatFileSize,
+  validatePdfOrImageFile,
   validateImageFile
 } from '../../utils/uploadValidation';
 import PaginationControls from '../common/PaginationControls';
@@ -172,6 +174,7 @@ const AdminBillingManagement = ({ token, showAlert, showConfirm }) => {
   const [savingDueKey, setSavingDueKey] = useState('');
   const [qrFile, setQrFile] = useState(null);
   const [uploadingQr, setUploadingQr] = useState(false);
+  const [uploadingAdminReceiptKey, setUploadingAdminReceiptKey] = useState('');
   const [viewingReceipt, setViewingReceipt] = useState(null);
   const [viewingQr, setViewingQr] = useState(false);
   const [yearInput, setYearInput] = useState(String(new Date().getFullYear()));
@@ -553,6 +556,59 @@ const AdminBillingManagement = ({ token, showAlert, showConfirm }) => {
     }
 
     setUploadingQr(false);
+  };
+
+  const handleAdminReceiptUpload = async (month, event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    const record = billingData[month];
+    if (!record?.paid && record?.paymentStatus !== 'verified') {
+      notify('Verify the payment before uploading the issued receipt.', 'error');
+      return;
+    }
+
+    const validation = validatePdfOrImageFile(file, {
+      label: 'Issued receipt',
+      maxBytes: DOCUMENT_UPLOAD_MAX_BYTES
+    });
+
+    if (!validation.valid) {
+      notify(validation.message, 'error');
+      return;
+    }
+
+    const uploadKey = `${year}-${month}`;
+    setUploadingAdminReceiptKey(uploadKey);
+
+    try {
+      const formData = new FormData();
+      formData.append('receipt', file);
+
+      const response = await fetch(`${API}/billing/${selected._id}/${year}/${month}/admin-receipt`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data?.message || 'Failed to upload issued receipt');
+      }
+
+      setBillingData(data.months || emptyMonths());
+      setBillingMonthlyDue(Number(data.monthlyDue) || monthlyDue);
+      notify('Issued receipt uploaded successfully.', 'success');
+      await updateDirectoryAfterMutation();
+    } catch (error) {
+      notify(error.message || 'Failed to upload issued receipt', 'error');
+    } finally {
+      setUploadingAdminReceiptKey('');
+    }
   };
 
   const handleMonthlyDueSave = async (occupancyType) => {
@@ -1186,7 +1242,8 @@ const AdminBillingManagement = ({ token, showAlert, showConfirm }) => {
                   <th>Date Paid</th>
                   <th>Remarks</th>
                   <th>Payment</th>
-                  <th>Receipt</th>
+                  <th>Payment Proof</th>
+                  <th>Issued Receipt</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
@@ -1197,6 +1254,9 @@ const AdminBillingManagement = ({ token, showAlert, showConfirm }) => {
                   const isEditing = editingRow === month;
                   const isPaid = record.paid;
                   const hasReceipt = Boolean(record.receipt?.path);
+                  const hasAdminReceipt = Boolean(record.adminReceipt?.path);
+                  const canUploadAdminReceipt = isPaid || record.paymentStatus === 'verified';
+                  const adminReceiptKey = `${year}-${month}`;
 
                   return (
                     <tr key={month} className={isPaid ? 'billing-tr-paid' : 'billing-tr-unpaid'}>
@@ -1256,12 +1316,39 @@ const AdminBillingManagement = ({ token, showAlert, showConfirm }) => {
                       </td>
                       <td>
                         {hasReceipt ? (
-                          <button className="billing-btn-view" onClick={() => setViewingReceipt({ month, receipt: record.receipt })}>
+                          <button className="billing-btn-view" onClick={() => setViewingReceipt({ month, receipt: record.receipt, kind: 'payment' })}>
                             <Eye size={13} /> View
                           </button>
                         ) : (
                           <span className="billing-cell-empty">-</span>
                         )}
+                      </td>
+                      <td>
+                        <div className="billing-issued-receipt-cell">
+                          {hasAdminReceipt ? (
+                            <button className="billing-btn-view" onClick={() => setViewingReceipt({ month, receipt: record.adminReceipt, kind: 'issued' })}>
+                              <Eye size={13} /> View
+                            </button>
+                          ) : (
+                            <span className="billing-cell-empty">Not issued</span>
+                          )}
+                          {canUploadAdminReceipt && (
+                            <label className="billing-btn-upload-issued">
+                              <Upload size={13} />
+                              {uploadingAdminReceiptKey === adminReceiptKey
+                                ? 'Uploading...'
+                                : hasAdminReceipt
+                                ? 'Replace'
+                                : 'Upload'}
+                              <input
+                                type="file"
+                                accept="image/*,application/pdf"
+                                disabled={uploadingAdminReceiptKey === adminReceiptKey}
+                                onChange={(event) => handleAdminReceiptUpload(month, event)}
+                              />
+                            </label>
+                          )}
+                        </div>
                       </td>
                       <td>
                         <span className={`billing-status-badge ${record.paymentStatus || 'none'}`}>
@@ -1309,7 +1396,7 @@ const AdminBillingManagement = ({ token, showAlert, showConfirm }) => {
                   <td className="billing-tfoot-label">TOTAL</td>
                   <td className="billing-tfoot-amount">{formatCurrency(totalDue)}</td>
                   <td colSpan={4} />
-                  <td colSpan={3}>
+                  <td colSpan={4}>
                     <div className="billing-tfoot-summary">
                       <span className="tfoot-paid">Paid: {formatCurrency(totalAmount)}</span>
                       <span className="tfoot-unpaid">Unpaid: {formatCurrency(totalUnpaid)}</span>
@@ -1328,11 +1415,11 @@ const AdminBillingManagement = ({ token, showAlert, showConfirm }) => {
 
       {viewingReceipt && (
         <FileViewerModal
-          title={`${formatMonthLabel(viewingReceipt.month)} Receipt`}
-          subtitle={viewingReceipt.receipt.originalName || 'Billing receipt'}
+          title={`${formatMonthLabel(viewingReceipt.month)} ${viewingReceipt.kind === 'issued' ? 'Issued Receipt' : 'Payment Proof'}`}
+          subtitle={viewingReceipt.receipt.originalName || (viewingReceipt.kind === 'issued' ? 'Issued billing receipt' : 'Resident payment proof')}
           fileUrl={assetUrl(viewingReceipt.receipt.path)}
           downloadUrl={assetUrl(viewingReceipt.receipt.path)}
-          downloadName={viewingReceipt.receipt.originalName || `${formatMonthLabel(viewingReceipt.month)}-receipt`}
+          downloadName={viewingReceipt.receipt.originalName || `${formatMonthLabel(viewingReceipt.month)}-${viewingReceipt.kind === 'issued' ? 'issued-receipt' : 'payment-proof'}`}
           isPdf={viewingReceipt.receipt.mimetype === 'application/pdf'}
           onClose={() => setViewingReceipt(null)}
         />

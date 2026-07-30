@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { apiUrl } from '../../utils/api';
+import { apiUrl, assetUrl } from '../../utils/api';
 import {
   CalendarDays,
   CheckCircle2,
   Download,
+  Eye,
   FileText,
   Pencil,
   PlusCircle,
@@ -11,12 +12,19 @@ import {
   RotateCcw,
   Save,
   Trash2,
+  Upload,
   Wallet,
   X
 } from 'lucide-react';
 import './AdminBillsAuditLogs.css';
 import PaginationControls from '../common/PaginationControls';
+import FileViewerModal from '../common/FileViewerModal';
 import { buildPaginatedUrl, parsePaginatedResponse } from '../../utils/pagination';
+import {
+  DOCUMENT_UPLOAD_MAX_BYTES,
+  formatFileSize,
+  validatePdfOrImageFile
+} from '../../utils/uploadValidation';
 
 const API = apiUrl('/admin-bill-audit-logs');
 
@@ -58,6 +66,8 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [editingId, setEditingId] = useState('');
   const [togglingPaidId, setTogglingPaidId] = useState('');
+  const [uploadingReceiptId, setUploadingReceiptId] = useState('');
+  const [viewingReceipt, setViewingReceipt] = useState(null);
   const [coverageStartDate, setCoverageStartDate] = useState('');
   const [coverageEndDate, setCoverageEndDate] = useState('');
   const [form, setForm] = useState(buildEmptyForm);
@@ -304,6 +314,55 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
     runToggle();
   };
 
+  const handleReceiptUpload = async (log, event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    if (!log.isPaid) {
+      showAlert && showAlert('Mark this bill as paid before uploading a receipt.', 'error');
+      return;
+    }
+
+    const validation = validatePdfOrImageFile(file, {
+      label: 'Bill receipt',
+      maxBytes: DOCUMENT_UPLOAD_MAX_BYTES
+    });
+
+    if (!validation.valid) {
+      showAlert && showAlert(validation.message, 'error');
+      return;
+    }
+
+    setUploadingReceiptId(log._id);
+
+    try {
+      const formData = new FormData();
+      formData.append('receipt', file);
+
+      const response = await fetch(`${API}/${log._id}/receipt`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data?.message || 'Failed to upload bill receipt');
+      }
+
+      showAlert && showAlert('Bill receipt uploaded successfully.', 'success');
+      await fetchLogs(page);
+    } catch (error) {
+      showAlert && showAlert(error.message || 'Failed to upload bill receipt', 'error');
+    } finally {
+      setUploadingReceiptId('');
+    }
+  };
+
   const handleDownloadPdf = async () => {
     setDownloadingPdf(true);
 
@@ -529,6 +588,7 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
                      <th>Bill Date</th>
                      <th>Status</th>
                      <th>Paid Date</th>
+                     <th>Receipt</th>
                      <th>Notes</th>
                      <th>Recorded By</th>
                      <th>Last Updated</th>
@@ -561,6 +621,41 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
                               ? 'Recorded as paid'
                               : 'Waiting for payment'}
                           </span>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="admin-bill-audit-receipt-cell">
+                          {log.receipt?.path ? (
+                            <button
+                              type="button"
+                              className="admin-bill-audit-receipt-view"
+                              onClick={() => setViewingReceipt(log)}
+                            >
+                              <Eye size={14} />
+                              View
+                            </button>
+                          ) : (
+                            <span className="admin-bill-audit-receipt-empty">No receipt</span>
+                          )}
+                          {log.isPaid && (
+                            <label
+                              className="admin-bill-audit-receipt-upload"
+                              title={`JPG, PNG, or PDF up to ${formatFileSize(DOCUMENT_UPLOAD_MAX_BYTES)}`}
+                            >
+                              <Upload size={14} />
+                              {uploadingReceiptId === log._id
+                                ? 'Uploading...'
+                                : log.receipt?.path
+                                ? 'Replace'
+                                : `Upload`}
+                              <input
+                                type="file"
+                                accept="image/*,application/pdf"
+                                disabled={uploadingReceiptId === log._id}
+                                onChange={(event) => handleReceiptUpload(log, event)}
+                              />
+                            </label>
+                          )}
                         </div>
                       </td>
                       <td className="admin-bill-audit-notes">{log.notes || '-'}</td>
@@ -603,6 +698,17 @@ const AdminBillsAuditLogs = ({ token, showAlert, showConfirm }) => {
           )}
         </div>
       </div>
+      {viewingReceipt?.receipt?.path && (
+        <FileViewerModal
+          title={`${viewingReceipt.billName} Receipt`}
+          subtitle={viewingReceipt.receipt.originalName || 'Bill receipt'}
+          fileUrl={assetUrl(viewingReceipt.receipt.path)}
+          downloadUrl={assetUrl(viewingReceipt.receipt.path)}
+          downloadName={viewingReceipt.receipt.originalName || `${viewingReceipt.billName}-receipt`}
+          isPdf={viewingReceipt.receipt.mimetype === 'application/pdf'}
+          onClose={() => setViewingReceipt(null)}
+        />
+      )}
     </div>
   );
 };

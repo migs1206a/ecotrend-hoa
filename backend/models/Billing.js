@@ -23,7 +23,8 @@ const monthRecordSchema = new mongoose.Schema({
     enum: ['none', 'pending', 'verified', 'rejected'],
     default: 'none'
   },
-  receipt: { type: storedFileSchema, default: () => ({}) }
+  receipt: { type: storedFileSchema, default: () => ({}) },
+  adminReceipt: { type: storedFileSchema, default: () => ({}) }
 }, { _id: false });
 
 const billingSchema = new mongoose.Schema({

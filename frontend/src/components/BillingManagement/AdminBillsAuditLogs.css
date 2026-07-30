@@ -380,7 +380,9 @@
 
 .admin-bill-audit-paid-btn,
 .admin-bill-audit-edit,
-.admin-bill-audit-delete {
+.admin-bill-audit-delete,
+.admin-bill-audit-receipt-view,
+.admin-bill-audit-receipt-upload {
   padding: 0.55rem 0.8rem;
   font-size: 0.78rem;
 }
@@ -396,6 +398,48 @@
   font-family: inherit;
   font-weight: 700;
   transition: all 0.2s ease;
+}
+
+.admin-bill-audit-receipt-cell {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  min-width: 10rem;
+}
+
+.admin-bill-audit-receipt-view,
+.admin-bill-audit-receipt-upload {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border: none;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 700;
+  transition: all 0.2s ease;
+}
+
+.admin-bill-audit-receipt-view {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.admin-bill-audit-receipt-upload {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.admin-bill-audit-receipt-upload input {
+  display: none;
+}
+
+.admin-bill-audit-receipt-empty {
+  color: var(--gray-400);
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 
 .admin-bill-audit-paid-btn.mark {

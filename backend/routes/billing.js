@@ -8,6 +8,7 @@ const {
   updateMonth,
   getSummary,
   uploadBillingReceipt,
+  uploadBillingAdminReceipt,
   reviewBillingReceipt,
   getBillingSettings,
   updateGcashQr,
@@ -64,6 +65,13 @@ router.post(
   }),
   receiptUpload.single('receipt'),
   uploadBillingReceipt
+);
+router.post(
+  '/:residentId/:year/:month/admin-receipt',
+  auth,
+  requireOfficerModule('billing'),
+  receiptUpload.single('receipt'),
+  uploadBillingAdminReceipt
 );
 router.patch('/:residentId/:year/:month/review', auth, requireOfficerModule('billing'), reviewBillingReceipt);
 
