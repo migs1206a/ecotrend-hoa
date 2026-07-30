@@ -25,7 +25,7 @@ const INITIAL_MESSAGES = [
 ];
 
 const CHAT_STORAGE_KEY = 'ecotrend-admin-ai-chatbot-history-v2';
-const DOCK_POSITION_STORAGE_KEY = 'ecotrend-admin-ai-chatbot-dock-position-v1';
+const DOCK_SIDE_STORAGE_KEY = 'ecotrend-admin-ai-chatbot-dock-side-v1';
 
 const SUGGESTED_PROMPTS = [
   'How many approved residents do we currently have?',
@@ -95,24 +95,13 @@ const readStoredMessages = () => {
   }
 };
 
-const readStoredDockPosition = () => {
+const readStoredDockSide = () => {
   if (typeof window === 'undefined') {
-    return null;
+    return 'right';
   }
 
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(DOCK_POSITION_STORAGE_KEY) || 'null');
-    const x = Number(parsed?.x);
-    const y = Number(parsed?.y);
-
-    if (!Number.isFinite(x) || !Number.isFinite(y)) {
-      return null;
-    }
-
-    return { x, y };
-  } catch (error) {
-    return null;
-  }
+  const storedSide = String(window.localStorage.getItem(DOCK_SIDE_STORAGE_KEY) || 'right');
+  return storedSide === 'left' ? 'left' : 'right';
 };
 
 const formatTime = (value) => {
@@ -127,7 +116,8 @@ const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => 
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
-  const [dockPosition, setDockPosition] = useState(() => readStoredDockPosition());
+  const [dockSide, setDockSide] = useState(() => readStoredDockSide());
+  const [dockDragX, setDockDragX] = useState(null);
   const dockRef = useRef(null);
   const dockDragRef = useRef(null);
   const ignoreNextLauncherClickRef = useRef(false);
@@ -148,46 +138,11 @@ const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => 
 
   useEffect(() => {
     if (!isDock || typeof window === 'undefined') {
-      return undefined;
-    }
-
-    const handleResize = () => {
-      setDockPosition((current) => {
-        if (!current) {
-          return current;
-        }
-
-        const launcher = dockRef.current?.querySelector('.admin-ai-chatbot-dock__launcher');
-        const width = launcher?.offsetWidth || 148;
-        const height = launcher?.offsetHeight || 60;
-        const margin = 12;
-        const next = {
-          x: Math.min(Math.max(margin, current.x), window.innerWidth - width - margin),
-          y: Math.min(Math.max(margin, current.y), window.innerHeight - height - margin)
-        };
-
-        window.localStorage.setItem(DOCK_POSITION_STORAGE_KEY, JSON.stringify(next));
-        return next;
-      });
-    };
-
-    window.addEventListener('resize', handleResize);
-    handleResize();
-
-    return () => window.removeEventListener('resize', handleResize);
-  }, [isDock]);
-
-  useEffect(() => {
-    if (!isDock || typeof window === 'undefined') {
       return;
     }
 
-    if (dockPosition) {
-      window.localStorage.setItem(DOCK_POSITION_STORAGE_KEY, JSON.stringify(dockPosition));
-    } else {
-      window.localStorage.removeItem(DOCK_POSITION_STORAGE_KEY);
-    }
-  }, [dockPosition, isDock]);
+    window.localStorage.setItem(DOCK_SIDE_STORAGE_KEY, dockSide);
+  }, [dockSide, isDock]);
 
   useEffect(() => {
     if (!isDock || typeof window === 'undefined') {
@@ -213,19 +168,21 @@ const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => 
       ignoreNextLauncherClickRef.current = true;
 
       const margin = 12;
-      setDockPosition({
-        x: Math.min(Math.max(margin, drag.startX + dx), window.innerWidth - drag.width - margin),
-        y: Math.min(Math.max(margin, drag.startY + dy), window.innerHeight - drag.height - margin)
-      });
+      drag.currentX = Math.min(Math.max(margin, drag.startX + dx), window.innerWidth - drag.width - margin);
+      setDockDragX(drag.currentX);
     };
 
     const handleWindowPointerUp = () => {
       const drag = dockDragRef.current;
 
       if (drag?.moved) {
+        const launcherWidth = drag.width || 148;
+        const launcherCenter = (drag.currentX ?? drag.startX) + launcherWidth / 2;
         ignoreNextLauncherClickRef.current = true;
+        setDockSide(launcherCenter < window.innerWidth / 2 ? 'left' : 'right');
       }
 
+      setDockDragX(null);
       dockDragRef.current = null;
     };
 
@@ -341,16 +298,13 @@ const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => 
     event.preventDefault();
 
     const launcherRect = event.currentTarget.getBoundingClientRect();
-    const dockRect = dockRef.current?.getBoundingClientRect() || launcherRect;
 
     dockDragRef.current = {
       pointerId: event.pointerId,
       startClientX: event.clientX,
-      startClientY: event.clientY,
-      startX: dockPosition?.x ?? dockRect.left,
-      startY: dockPosition?.y ?? dockRect.top,
+      startX: launcherRect.left,
       width: launcherRect.width,
-      height: launcherRect.height,
+      currentX: launcherRect.left,
       moved: false
     };
   };
@@ -458,18 +412,17 @@ const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => 
   );
 
   if (isDock) {
-    const dockStyle = dockPosition
+    const dockStyle = dockDragX !== null
       ? {
-          left: `${dockPosition.x}px`,
-          top: `${dockPosition.y}px`,
+          left: `${dockDragX}px`,
           right: 'auto',
-          bottom: 'auto'
+          transform: 'none'
         }
       : undefined;
 
     return (
       <div
-        className={`admin-ai-chatbot-dock ${dockOpen ? 'is-open' : ''} ${dockPosition ? 'is-positioned' : ''}`}
+        className={`admin-ai-chatbot-dock ${dockOpen ? 'is-open' : ''} is-${dockSide} ${dockDragX !== null ? 'is-dragging' : ''}`}
         style={dockStyle}
         ref={dockRef}
       >
@@ -550,7 +503,7 @@ const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => 
               setDockOpen((current) => !current);
             }}
             aria-label={dockOpen ? 'Hide AI chatbot' : 'Show AI chatbot'}
-            title="Click to open, drag to move"
+            title="Click to open, drag left or right to move"
           >
             <div className="admin-ai-chatbot-dock__launcher-icon">
               <MessageSquare size={18} />
