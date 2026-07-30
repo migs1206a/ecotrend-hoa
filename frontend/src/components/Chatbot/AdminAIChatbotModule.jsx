@@ -25,6 +25,7 @@ const INITIAL_MESSAGES = [
 ];
 
 const CHAT_STORAGE_KEY = 'ecotrend-admin-ai-chatbot-history-v2';
+const DOCK_POSITION_STORAGE_KEY = 'ecotrend-admin-ai-chatbot-dock-position-v1';
 
 const SUGGESTED_PROMPTS = [
   'How many approved residents do we currently have?',
@@ -94,6 +95,26 @@ const readStoredMessages = () => {
   }
 };
 
+const readStoredDockPosition = () => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(DOCK_POSITION_STORAGE_KEY) || 'null');
+    const x = Number(parsed?.x);
+    const y = Number(parsed?.y);
+
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return null;
+    }
+
+    return { x, y };
+  } catch (error) {
+    return null;
+  }
+};
+
 const formatTime = (value) => {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
@@ -106,6 +127,10 @@ const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => 
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
+  const [dockPosition, setDockPosition] = useState(() => readStoredDockPosition());
+  const dockRef = useRef(null);
+  const dockDragRef = useRef(null);
+  const ignoreNextLauncherClickRef = useRef(false);
   const threadRef = useRef(null);
   const isDock = mode === 'dock';
 
@@ -120,6 +145,49 @@ const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => 
       window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
     }
   }, [messages]);
+
+  useEffect(() => {
+    if (!isDock || typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const handleResize = () => {
+      setDockPosition((current) => {
+        if (!current) {
+          return current;
+        }
+
+        const launcher = dockRef.current?.querySelector('.admin-ai-chatbot-dock__launcher');
+        const width = launcher?.offsetWidth || 148;
+        const height = launcher?.offsetHeight || 60;
+        const margin = 12;
+        const next = {
+          x: Math.min(Math.max(margin, current.x), window.innerWidth - width - margin),
+          y: Math.min(Math.max(margin, current.y), window.innerHeight - height - margin)
+        };
+
+        window.localStorage.setItem(DOCK_POSITION_STORAGE_KEY, JSON.stringify(next));
+        return next;
+      });
+    };
+
+    window.addEventListener('resize', handleResize);
+    handleResize();
+
+    return () => window.removeEventListener('resize', handleResize);
+  }, [isDock]);
+
+  useEffect(() => {
+    if (!isDock || typeof window === 'undefined') {
+      return;
+    }
+
+    if (dockPosition) {
+      window.localStorage.setItem(DOCK_POSITION_STORAGE_KEY, JSON.stringify(dockPosition));
+    } else {
+      window.localStorage.removeItem(DOCK_POSITION_STORAGE_KEY);
+    }
+  }, [dockPosition, isDock]);
 
   const promptCountLabel = useMemo(
     () => `${SUGGESTED_PROMPTS.length} quick prompts`,
@@ -212,6 +280,66 @@ const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => 
 
     setMessages(INITIAL_MESSAGES);
     setInput('');
+  };
+
+  const handleLauncherPointerDown = (event) => {
+    if (!isDock || event.button !== 0) {
+      return;
+    }
+
+    const launcherRect = event.currentTarget.getBoundingClientRect();
+    const dockRect = dockRef.current?.getBoundingClientRect() || launcherRect;
+
+    dockDragRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startX: dockPosition?.x ?? dockRect.left,
+      startY: dockPosition?.y ?? dockRect.top,
+      width: launcherRect.width,
+      height: launcherRect.height,
+      moved: false
+    };
+
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const handleLauncherPointerMove = (event) => {
+    const drag = dockDragRef.current;
+
+    if (!drag || drag.pointerId !== event.pointerId || typeof window === 'undefined') {
+      return;
+    }
+
+    const dx = event.clientX - drag.startClientX;
+    const dy = event.clientY - drag.startClientY;
+
+    if (!drag.moved && Math.hypot(dx, dy) < 4) {
+      return;
+    }
+
+    drag.moved = true;
+    ignoreNextLauncherClickRef.current = true;
+
+    const margin = 12;
+    setDockPosition({
+      x: Math.min(Math.max(margin, drag.startX + dx), window.innerWidth - drag.width - margin),
+      y: Math.min(Math.max(margin, drag.startY + dy), window.innerHeight - drag.height - margin)
+    });
+  };
+
+  const handleLauncherPointerUp = (event) => {
+    const drag = dockDragRef.current;
+
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    if (drag.moved) {
+      ignoreNextLauncherClickRef.current = true;
+    }
+
+    dockDragRef.current = null;
   };
 
   const renderPromptList = (compact = false) => (
@@ -317,8 +445,21 @@ const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => 
   );
 
   if (isDock) {
+    const dockStyle = dockPosition
+      ? {
+          left: `${dockPosition.x}px`,
+          top: `${dockPosition.y}px`,
+          right: 'auto',
+          bottom: 'auto'
+        }
+      : undefined;
+
     return (
-      <div className={`admin-ai-chatbot-dock ${dockOpen ? 'is-open' : ''}`}>
+      <div
+        className={`admin-ai-chatbot-dock ${dockOpen ? 'is-open' : ''} ${dockPosition ? 'is-positioned' : ''}`}
+        style={dockStyle}
+        ref={dockRef}
+      >
         {dockOpen && (
           <button
             type="button"
@@ -386,8 +527,20 @@ const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => 
           <button
             type="button"
             className="admin-ai-chatbot-dock__launcher"
-            onClick={() => setDockOpen((current) => !current)}
+            onPointerDown={handleLauncherPointerDown}
+            onPointerMove={handleLauncherPointerMove}
+            onPointerUp={handleLauncherPointerUp}
+            onPointerCancel={handleLauncherPointerUp}
+            onClick={() => {
+              if (ignoreNextLauncherClickRef.current) {
+                ignoreNextLauncherClickRef.current = false;
+                return;
+              }
+
+              setDockOpen((current) => !current);
+            }}
             aria-label={dockOpen ? 'Hide AI chatbot' : 'Show AI chatbot'}
+            title="Click to open, drag to move"
           >
             <div className="admin-ai-chatbot-dock__launcher-icon">
               <MessageSquare size={18} />
