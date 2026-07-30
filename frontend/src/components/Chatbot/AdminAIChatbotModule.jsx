@@ -189,6 +189,57 @@ const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => 
     }
   }, [dockPosition, isDock]);
 
+  useEffect(() => {
+    if (!isDock || typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const handleWindowPointerMove = (event) => {
+      const drag = dockDragRef.current;
+
+      if (!drag) {
+        return;
+      }
+
+      const dx = event.clientX - drag.startClientX;
+      const dy = event.clientY - drag.startClientY;
+
+      if (!drag.moved && Math.hypot(dx, dy) < 4) {
+        return;
+      }
+
+      event.preventDefault();
+      drag.moved = true;
+      ignoreNextLauncherClickRef.current = true;
+
+      const margin = 12;
+      setDockPosition({
+        x: Math.min(Math.max(margin, drag.startX + dx), window.innerWidth - drag.width - margin),
+        y: Math.min(Math.max(margin, drag.startY + dy), window.innerHeight - drag.height - margin)
+      });
+    };
+
+    const handleWindowPointerUp = () => {
+      const drag = dockDragRef.current;
+
+      if (drag?.moved) {
+        ignoreNextLauncherClickRef.current = true;
+      }
+
+      dockDragRef.current = null;
+    };
+
+    window.addEventListener('pointermove', handleWindowPointerMove, { passive: false });
+    window.addEventListener('pointerup', handleWindowPointerUp);
+    window.addEventListener('pointercancel', handleWindowPointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', handleWindowPointerMove);
+      window.removeEventListener('pointerup', handleWindowPointerUp);
+      window.removeEventListener('pointercancel', handleWindowPointerUp);
+    };
+  }, [isDock]);
+
   const promptCountLabel = useMemo(
     () => `${SUGGESTED_PROMPTS.length} quick prompts`,
     []
@@ -287,6 +338,8 @@ const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => 
       return;
     }
 
+    event.preventDefault();
+
     const launcherRect = event.currentTarget.getBoundingClientRect();
     const dockRect = dockRef.current?.getBoundingClientRect() || launcherRect;
 
@@ -300,46 +353,6 @@ const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => 
       height: launcherRect.height,
       moved: false
     };
-
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-  };
-
-  const handleLauncherPointerMove = (event) => {
-    const drag = dockDragRef.current;
-
-    if (!drag || drag.pointerId !== event.pointerId || typeof window === 'undefined') {
-      return;
-    }
-
-    const dx = event.clientX - drag.startClientX;
-    const dy = event.clientY - drag.startClientY;
-
-    if (!drag.moved && Math.hypot(dx, dy) < 4) {
-      return;
-    }
-
-    drag.moved = true;
-    ignoreNextLauncherClickRef.current = true;
-
-    const margin = 12;
-    setDockPosition({
-      x: Math.min(Math.max(margin, drag.startX + dx), window.innerWidth - drag.width - margin),
-      y: Math.min(Math.max(margin, drag.startY + dy), window.innerHeight - drag.height - margin)
-    });
-  };
-
-  const handleLauncherPointerUp = (event) => {
-    const drag = dockDragRef.current;
-
-    if (!drag || drag.pointerId !== event.pointerId) {
-      return;
-    }
-
-    if (drag.moved) {
-      ignoreNextLauncherClickRef.current = true;
-    }
-
-    dockDragRef.current = null;
   };
 
   const renderPromptList = (compact = false) => (
@@ -528,9 +541,6 @@ const AdminAIChatbotModule = ({ token, showAlert, mode = 'page', onExpand }) => 
             type="button"
             className="admin-ai-chatbot-dock__launcher"
             onPointerDown={handleLauncherPointerDown}
-            onPointerMove={handleLauncherPointerMove}
-            onPointerUp={handleLauncherPointerUp}
-            onPointerCancel={handleLauncherPointerUp}
             onClick={() => {
               if (ignoreNextLauncherClickRef.current) {
                 ignoreNextLauncherClickRef.current = false;
