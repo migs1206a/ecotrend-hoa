@@ -66,6 +66,7 @@ const getPreviewHostname = (url = '') => {
   }
 };
 const isKnownExternalPortalUrl = (url = '') => /(^|\.)ispyconnect\.com$/i.test(getPreviewHostname(url));
+const AGENT_DVR_MJPEG_EXAMPLE = 'http://OFFICE_PC_IP:8090/video.mjpg?oid=1&size=1280x720';
 const isEmbeddablePreviewUrl = (url = '') => {
   if (!url) {
     return false;
@@ -98,6 +99,33 @@ const normalizeForm = (feed = {}) => ({
 const getSourceLabel = (sourceType = '') =>
   SOURCE_TYPE_OPTIONS.find((option) => option.value === sourceType)?.label || 'Browser Feed';
 
+const CCTVImagePreview = ({ feed, previewUrl }) => {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [previewUrl]);
+
+  if (failed) {
+    return (
+      <div className="cctv-feed-placeholder">
+        <Radio size={34} />
+        <h4>Preview stream did not load</h4>
+        <p>Open the preview URL directly and confirm Agent DVR returns MJPEG. For Agent DVR, use a URL like {AGENT_DVR_MJPEG_EXAMPLE} and make sure the office PC firewall allows port 8090.</p>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={previewUrl}
+      alt={`${feed.name} CCTV feed`}
+      className="cctv-feed-media"
+      onError={() => setFailed(true)}
+    />
+  );
+};
+
 const CCTVPreview = ({ feed }) => {
   const previewUrl = String(feed?.previewUrl || '').trim();
   const status = String(feed?.status || 'active');
@@ -117,13 +145,13 @@ const CCTVPreview = ({ feed }) => {
       <div className="cctv-feed-placeholder">
         <Server size={34} />
         <h4>{feed?.hasNativeSource ? 'Native camera configured' : 'Ready for preview link'}</h4>
-        <p>{feed?.hasNativeSource ? 'Add an Agent DVR, WebRTC, or HLS browser link to preview this camera here.' : 'Save a browser-safe preview URL to display this camera live inside the module.'}</p>
+        <p>{feed?.hasNativeSource ? 'Add an Agent DVR MJPEG, WebRTC, or HLS browser link to preview this camera here.' : 'Save a browser-safe preview URL to display this camera live inside the module.'}</p>
       </div>
     );
   }
 
   if (isImageStreamUrl(previewUrl)) {
-    return <img src={previewUrl} alt={`${feed.name} CCTV feed`} className="cctv-feed-media" />;
+    return <CCTVImagePreview feed={feed} previewUrl={previewUrl} />;
   }
 
   if (isEmbeddableVideoUrl(previewUrl)) {
@@ -138,8 +166,8 @@ const CCTVPreview = ({ feed }) => {
     return (
       <div className="cctv-feed-placeholder">
         <ExternalLink size={34} />
-        <h4>External monitor link</h4>
-        <p>This provider blocks embedded playback. Use the Open button to launch the live Agent DVR portal.</p>
+        <h4>Agent DVR cloud opens externally</h4>
+        <p>iSpyConnect blocks embedded playback. Use the Open button, or save a local Agent DVR MJPEG URL like {AGENT_DVR_MJPEG_EXAMPLE} for in-card preview.</p>
       </div>
     );
   }
@@ -469,8 +497,8 @@ const CCTVFeedsModule = ({ token, mode = 'admin', showAlert, showConfirm }) => {
 
             <label className="cctv-field cctv-field--wide">
               <span>Browser Preview URL</span>
-              <input value={form.previewUrl} onChange={(event) => updateForm('previewUrl', event.target.value)} placeholder="https://agent.local:8090/viewer or https://gateway.local/cctv/main.m3u8" maxLength={1000} />
-              <small>Use an HLS, WebRTC, MJPEG, MP4, or web dashboard URL that the browser can render.</small>
+              <input value={form.previewUrl} onChange={(event) => updateForm('previewUrl', event.target.value)} placeholder="http://office-pc-ip:8090/video.mjpg?oid=1&size=1280x720 or https://gateway.local/cctv/main.m3u8" maxLength={1000} />
+              <small>Use Agent DVR MJPEG for office LAN tests, or an HTTPS HLS/WebRTC relay URL for the deployed site.</small>
             </label>
 
             <label className="cctv-field cctv-field--wide">
@@ -515,7 +543,7 @@ const CCTVFeedsModule = ({ token, mode = 'admin', showAlert, showConfirm }) => {
             const previewEmbeddable = isEmbeddablePreviewUrl(feed.previewUrl);
             const browserReady = Boolean(feed.previewUrl) && previewEmbeddable;
             const monitoringSummary = isKnownExternalPortalUrl(feed.previewUrl)
-              ? 'External Agent DVR portal available'
+              ? 'Agent DVR cloud opens externally; use local MJPEG or relay URL to embed'
               : feed.monitoringSummary;
 
             return (
