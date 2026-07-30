@@ -2332,19 +2332,19 @@ const AdminDashboard = ({ onLogout, showConfirm, showAlert }) => {
       case 'vehicles':       return VehicleManagementContent();
       case 'visitors':       return VisitorLogsContent();
       case 'pre-registered': return PreRegisteredVisitorsContent();
-      case 'facilities':     return wrapModule(<AdminFacilityManagement token={token} showConfirm={showConfirm} />);
-      case 'complaints':     return wrapModule(<AdminComplaintManagement token={token} />);
-      case 'announcements':  return wrapModule(<AdminAnnouncementManagement token={token} showConfirm={showConfirm} />);
+      case 'facilities':     return wrapModule(<AdminFacilityManagement token={token} showAlert={showAlert} showConfirm={showConfirm} />);
+      case 'complaints':     return wrapModule(<AdminComplaintManagement token={token} showAlert={showAlert} showConfirm={showConfirm} />);
+      case 'announcements':  return wrapModule(<AdminAnnouncementManagement token={token} showConfirm={showConfirm} showAlert={showAlert} />);
       case 'contact_hoa':    return wrapModule(<AdminContactHOAManagement token={token} showAlert={showAlert} showConfirm={showConfirm} />);
       case 'cctv':           return wrapModule(<CCTVFeedsModule token={token} mode="admin" showAlert={showAlert} showConfirm={showConfirm} />);
-      case 'billing':        return wrapModule(<AdminBillingManagement token={token} showConfirm={showConfirm} />);
+      case 'billing':        return wrapModule(<AdminBillingManagement token={token} showAlert={showAlert} showConfirm={showConfirm} />);
       case 'bill_audit_logs': return wrapModule(<AdminBillsAuditLogs token={token} showConfirm={showConfirm} showAlert={showAlert} />);
       case 'audit_logs':     return wrapModule(<AdminAuditLogs token={token} showAlert={showAlert} />);
-      case 'documents':      return wrapModule(<AdminDocumentsManagement token={token} />);
+      case 'documents':      return wrapModule(<AdminDocumentsManagement token={token} showAlert={showAlert} />);
       case 'analytics':      return wrapModule(<AIAnalyticsModule token={token} showAlert={showAlert} />);
       case 'ai_chatbot':     return wrapModule(<AdminAIChatbotModule token={token} showAlert={showAlert} />);
       case 'subdivision_map': return wrapModule(<SubdivisionMap3D role={getUserRoleLabel(user)} />);
-      case 'reports':        return wrapModule(<AdminReportsManagement token={token} />);
+      case 'reports':        return wrapModule(<AdminReportsManagement token={token} showAlert={showAlert} />);
       case 'manage_accounts': return wrapModule(<ManageAccountsModule showConfirm={showConfirm} showAlert={showAlert} />);
       default:               return <OverviewContent />;
     }

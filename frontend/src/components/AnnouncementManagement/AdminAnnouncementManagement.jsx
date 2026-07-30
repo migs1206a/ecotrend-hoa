@@ -85,7 +85,7 @@ const AdminAnnouncementManagement = ({ token, showConfirm, showAlert }) => {
   };
 
   const handleDelete = (id) => {
-    const fn = showConfirm || ((msg, cb) => { if (window.confirm(msg)) cb(); });
+    const fn = showConfirm || ((msg) => console.warn(`Confirmation unavailable: ${msg}`));
     fn('Are you sure you want to delete this announcement?', async () => {
       setLoading(true);
       try {

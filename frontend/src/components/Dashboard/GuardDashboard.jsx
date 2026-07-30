@@ -141,7 +141,7 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
     const accessCode = getVisitorAccessCode(visitor);
 
     if (!accessCode) {
-      window.alert('No visitor code is available for this pass yet.');
+      showAlert?.('No visitor code is available for this pass yet.', 'error');
       return;
     }
 
@@ -149,7 +149,7 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
       code: accessCode,
       nonce: Date.now()
     });
-    window.alert('Visitor code loaded into the manual QR field.');
+    showAlert?.('Visitor code loaded into the manual QR field.', 'success');
   };
 
   useEffect(() => {
@@ -799,6 +799,7 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
           token={token}
           codeRequest={visitorScannerCodeRequest}
           onRecorded={handleVisitorQrRecorded}
+          showAlert={showAlert}
         />
 
         <div style={{ marginBottom: '1rem', padding: '1rem', backgroundColor: 'white', borderRadius: '0.5rem', boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)' }}>
@@ -1505,7 +1506,7 @@ const GuardDashboard = ({ onLogout, showConfirm, showAlert }) => {
       );
     }
 
-    if (activeModule === 'facilities') return wrapModule(<GuardFacilityReservations token={token} />);
+    if (activeModule === 'facilities') return wrapModule(<GuardFacilityReservations token={token} showAlert={showAlert} showConfirm={showConfirm} />);
     if (activeModule === 'announcements') return wrapModule(<GuardAnnouncement token={token} />);
     if (activeModule === 'cctv') return wrapModule(<CCTVFeedsModule token={token} mode="guard" showAlert={showAlert} />);
     if (activeModule === 'subdivision_map') return wrapModule(<SubdivisionMap3D role={userRoleLabel} />);

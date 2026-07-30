@@ -13,7 +13,7 @@ const statusMap = {
   rejected: { label: 'Rejected', className: 'admin-doc-status rejected' }
 };
 
-const AdminDocumentsManagement = ({ token }) => {
+const AdminDocumentsManagement = ({ token, showAlert }) => {
   const [residents, setResidents] = useState([]);
   const [selectedResidentId, setSelectedResidentId] = useState('all');
   const [submissions, setSubmissions] = useState([]);
@@ -27,6 +27,17 @@ const AdminDocumentsManagement = ({ token }) => {
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(null);
   const [viewMode, setViewMode] = useState('card');
+  const notify = useCallback(
+    (message, type = 'info') => {
+      if (typeof showAlert === 'function') {
+        showAlert(message, type);
+        return;
+      }
+
+      console.warn(message);
+    },
+    [showAlert]
+  );
 
   const fetchResidents = useCallback(async () => {
     try {
@@ -108,14 +119,15 @@ const AdminDocumentsManagement = ({ token }) => {
       });
       const data = await response.json();
       if (!response.ok) {
-        window.alert(data.message || 'Failed to review document submission');
+        notify(data.message || 'Failed to review document submission', 'error');
         return;
       }
       setEditingId('');
+      notify('Document review updated successfully.', 'success');
       fetchSubmissions();
     } catch (error) {
       console.error('Error reviewing document submission:', error);
-      window.alert('Failed to review document submission');
+      notify('Failed to review document submission', 'error');
     }
     setSaving(false);
   };

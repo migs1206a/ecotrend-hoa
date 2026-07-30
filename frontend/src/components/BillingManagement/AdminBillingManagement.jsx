@@ -121,7 +121,7 @@ const sortResidents = (first, second) => {
   );
 };
 
-const AdminBillingManagement = ({ token, showConfirm }) => {
+const AdminBillingManagement = ({ token, showAlert, showConfirm }) => {
   const headers = useCallback(
     () => ({
       'Content-Type': 'application/json',
@@ -129,6 +129,14 @@ const AdminBillingManagement = ({ token, showConfirm }) => {
     }),
     [token]
   );
+  const notify = useCallback((message, type = 'info') => {
+    if (typeof showAlert === 'function') {
+      showAlert(message, type);
+      return;
+    }
+
+    console.warn(message);
+  }, [showAlert]);
 
   const [directory, setDirectory] = useState([]);
   const [loadingDirectory, setLoadingDirectory] = useState(true);
@@ -518,7 +526,7 @@ const AdminBillingManagement = ({ token, showConfirm }) => {
     });
 
     if (!validation.valid) {
-      window.alert(validation.message);
+      notify(validation.message, 'error');
       event.target.value = '';
       return;
     }
@@ -944,7 +952,7 @@ const AdminBillingManagement = ({ token, showConfirm }) => {
                   className="billing-qr-open-btn"
                   onClick={() => {
                     if (!settings?.gcashQr?.path) {
-                      window.alert('No GCash QR code uploaded yet');
+                      notify('No GCash QR code uploaded yet.', 'error');
                       return;
                     }
                     setViewingQr(true);

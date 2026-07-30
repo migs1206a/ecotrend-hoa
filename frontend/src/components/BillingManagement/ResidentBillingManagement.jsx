@@ -248,7 +248,7 @@ const ResidentBillingManagement = ({ token, userId, showAlert }) => {
             className="resident-billing-qr-open-btn"
             onClick={() => {
               if (!settings?.gcashQr?.path) {
-                window.alert('Admin has not uploaded the GCash QR code yet.');
+                showAlert?.('Admin has not uploaded the GCash QR code yet.', 'error');
                 return;
               }
               setViewingQr(true);

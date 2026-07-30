@@ -39,7 +39,7 @@ const COMPLAINT_URGENCY_OPTIONS = [
 const CATEGORY_LABELS = Object.fromEntries(COMPLAINT_CATEGORY_OPTIONS.map((option) => [option.value, option.label]));
 const URGENCY_LABELS = Object.fromEntries(COMPLAINT_URGENCY_OPTIONS.map((option) => [option.value, option.label]));
 
-const AdminComplaintManagement = ({ token }) => {
+const AdminComplaintManagement = ({ token, showAlert, showConfirm }) => {
   const [complaints, setComplaints] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -55,6 +55,28 @@ const AdminComplaintManagement = ({ token }) => {
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(null);
   const [viewMode, setViewMode] = useState('card');
+  const notify = useCallback(
+    (message, type = 'info') => {
+      if (typeof showAlert === 'function') {
+        showAlert(message, type);
+        return;
+      }
+
+      console.warn(message);
+    },
+    [showAlert]
+  );
+  const confirmAction = useCallback(
+    (message, onConfirm) => {
+      if (typeof showConfirm === 'function') {
+        showConfirm(message, onConfirm);
+        return;
+      }
+
+      console.warn(`Confirmation unavailable: ${message}`);
+    },
+    [showConfirm]
+  );
 
   const fetchComplaints = useCallback(async () => {
     setLoading(true);
@@ -161,41 +183,45 @@ const AdminComplaintManagement = ({ token }) => {
 
       const data = await response.json();
       if (!response.ok) {
-        window.alert(data.message || 'Failed to update complaint');
+        notify(data.message || 'Failed to update complaint', 'error');
         return;
       }
 
       setEditingId('');
+      notify('Complaint review updated successfully.', 'success');
       fetchComplaints();
     } catch (error) {
       console.error('Error updating complaint:', error);
-      window.alert('Failed to update complaint');
+      notify('Failed to update complaint', 'error');
     }
     setSaving(false);
   };
 
   const archiveComplaint = async (complaintId) => {
-    if (!window.confirm('Archive this resolved complaint?')) return;
+    confirmAction('Archive this resolved complaint?', async () => {
 
-    setSaving(true);
-    try {
-      const response = await fetch(apiUrl(`/complaints/${complaintId}/archive`), {
-        method: 'PATCH',
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      setSaving(true);
+      try {
+        const response = await fetch(apiUrl(`/complaints/${complaintId}/archive`), {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${token}` }
+        });
 
-      const data = await response.json();
-      if (!response.ok) {
-        window.alert(data.message || 'Failed to archive complaint');
-        return;
+        const data = await response.json();
+        if (!response.ok) {
+          notify(data.message || 'Failed to archive complaint', 'error');
+          return;
+        }
+
+        notify('Complaint archived successfully.', 'success');
+        fetchComplaints();
+      } catch (error) {
+        console.error('Error archiving complaint:', error);
+        notify('Failed to archive complaint', 'error');
+      } finally {
+        setSaving(false);
       }
-
-      fetchComplaints();
-    } catch (error) {
-      console.error('Error archiving complaint:', error);
-      window.alert('Failed to archive complaint');
-    }
-    setSaving(false);
+    });
   };
 
   return (

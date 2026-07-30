@@ -89,7 +89,7 @@ const preventNegativePriceInput = (event) => {
   }
 };
 
-const AdminFacilityManagement = ({ token }) => {
+const AdminFacilityManagement = ({ token, showAlert, showConfirm }) => {
   const [activePanel, setActivePanel] = useState('facilities');
   const [reservations, setReservations] = useState([]);
   const [settings, setSettings] = useState(null);
@@ -115,6 +115,28 @@ const AdminFacilityManagement = ({ token }) => {
   const [facilitySaving, setFacilitySaving] = useState(false);
   const [facilityError, setFacilityError] = useState('');
   const [showFacilityModal, setShowFacilityModal] = useState(false);
+  const notify = useCallback(
+    (message, type = 'info') => {
+      if (typeof showAlert === 'function') {
+        showAlert(message, type);
+        return;
+      }
+
+      console.warn(message);
+    },
+    [showAlert]
+  );
+  const confirmAction = useCallback(
+    (message, onConfirm) => {
+      if (typeof showConfirm === 'function') {
+        showConfirm(message, onConfirm);
+        return;
+      }
+
+      console.warn(`Confirmation unavailable: ${message}`);
+    },
+    [showConfirm]
+  );
 
   const facilities = useMemo(
     () => (Array.isArray(settings?.facilities) ? settings.facilities : []),
@@ -272,33 +294,35 @@ const AdminFacilityManagement = ({ token }) => {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        window.alert(data.message || 'Request failed');
+        notify(data.message || 'Request failed', 'error');
         return false;
       }
 
-      if (successMessage) window.alert(successMessage);
+      if (successMessage) notify(successMessage, 'success');
       fetchReservations();
       return true;
     } catch (error) {
       console.error('Facility action failed:', error);
-      window.alert('Request failed');
+      notify('Request failed', 'error');
       return false;
     }
   };
 
   const handleVerifyPayment = async (reservationId) => {
-    if (!window.confirm('Verify this uploaded receipt?')) return;
-    await runAction(`/facilities/${reservationId}/verify-payment`, { method: 'PATCH' }, 'Receipt verified successfully.');
+    confirmAction('Verify this uploaded receipt?', async () => {
+      await runAction(`/facilities/${reservationId}/verify-payment`, { method: 'PATCH' }, 'Receipt verified successfully.');
+    });
   };
 
   const handleApprove = async (reservationId) => {
-    if (!window.confirm('Approve this reservation?')) return;
-    await runAction(`/facilities/${reservationId}/approve`, { method: 'PATCH' }, 'Reservation approved successfully.');
+    confirmAction('Approve this reservation?', async () => {
+      await runAction(`/facilities/${reservationId}/approve`, { method: 'PATCH' }, 'Reservation approved successfully.');
+    });
   };
 
   const handleReject = async (reservationId) => {
     if (!rejectReason.trim()) {
-      window.alert('Please provide a rejection reason.');
+      notify('Please provide a rejection reason.', 'error');
       return;
     }
 
@@ -319,8 +343,9 @@ const AdminFacilityManagement = ({ token }) => {
   };
 
   const handleExpireOld = async () => {
-    if (!window.confirm('Expire all pending reservations that are already past their 12-hour hold?')) return;
-    await runAction('/facilities/expire-old', { method: 'POST' }, 'Expired old pending reservations.');
+    confirmAction('Expire all pending reservations that are already past their 12-hour hold?', async () => {
+      await runAction('/facilities/expire-old', { method: 'POST' }, 'Expired old pending reservations.');
+    });
   };
 
   const handleQrFileChange = (event) => {
@@ -336,7 +361,7 @@ const AdminFacilityManagement = ({ token }) => {
     });
 
     if (!validation.valid) {
-      window.alert(validation.message);
+      notify(validation.message, 'error');
       event.target.value = '';
       return;
     }
@@ -346,7 +371,7 @@ const AdminFacilityManagement = ({ token }) => {
 
   const handleQrUpload = async () => {
     if (!qrFile) {
-      window.alert('Please choose a QR image first.');
+      notify('Please choose a QR image first.', 'error');
       return;
     }
 
@@ -363,16 +388,16 @@ const AdminFacilityManagement = ({ token }) => {
 
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        window.alert(data.message || 'Failed to update GCash QR.');
+        notify(data.message || 'Failed to update GCash QR.', 'error');
         return;
       }
 
-      window.alert('Facility GCash QR updated successfully.');
+      notify('Facility GCash QR updated successfully.', 'success');
       setQrFile(null);
       fetchSettings();
     } catch (error) {
       console.error('Error updating GCash QR:', error);
-      window.alert('Failed to update GCash QR.');
+      notify('Failed to update GCash QR.', 'error');
     }
 
     setSavingQr(false);
@@ -474,7 +499,7 @@ const AdminFacilityManagement = ({ token }) => {
         throw new Error(data.message || 'Failed to save facility.');
       }
 
-      window.alert(isEditing ? 'Facility updated successfully.' : 'Facility created successfully.');
+      notify(isEditing ? 'Facility updated successfully.' : 'Facility created successfully.', 'success');
       closeFacilityModal();
       fetchSettings();
     } catch (error) {
@@ -485,32 +510,31 @@ const AdminFacilityManagement = ({ token }) => {
   };
 
   const handleFacilityDelete = async (facility) => {
-    if (!window.confirm(`Delete ${facility.name}?`)) {
-      return;
-    }
+    confirmAction(`Delete ${facility.name}?`, async () => {
 
-    try {
-      const response = await fetch(apiUrl(`/facilities/settings/facilities/${facility._id}`), {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      try {
+        const response = await fetch(apiUrl(`/facilities/settings/facilities/${facility._id}`), {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` }
+        });
 
-      const data = await response.json().catch(() => ({}));
+        const data = await response.json().catch(() => ({}));
 
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to delete facility.');
+        if (!response.ok) {
+          throw new Error(data.message || 'Failed to delete facility.');
+        }
+
+        notify('Facility deleted successfully.', 'success');
+
+        if (facilityForm.id === facility._id) {
+          closeFacilityModal();
+        }
+
+        fetchSettings();
+      } catch (error) {
+        notify(error.message || 'Failed to delete facility.', 'error');
       }
-
-      window.alert('Facility deleted successfully.');
-
-      if (facilityForm.id === facility._id) {
-        closeFacilityModal();
-      }
-
-      fetchSettings();
-    } catch (error) {
-      window.alert(error.message || 'Failed to delete facility.');
-    }
+    });
   };
 
   const getStatusMeta = (status) => {
@@ -755,7 +779,7 @@ const AdminFacilityManagement = ({ token }) => {
               className="facility-admin-qr-preview-btn"
               onClick={() => {
                 if (!settings?.gcashQr?.path) {
-                  window.alert('No facility QR uploaded yet.');
+                  notify('No facility QR uploaded yet.', 'error');
                   return;
                 }
                 setViewingQr(true);

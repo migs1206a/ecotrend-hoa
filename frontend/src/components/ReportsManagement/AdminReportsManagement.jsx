@@ -62,7 +62,7 @@ const formatDateTime = (value) => {
   return date.toLocaleString();
 };
 
-const AdminReportsManagement = ({ token }) => {
+const AdminReportsManagement = ({ token, showAlert }) => {
   const [archives, setArchives] = useState([]);
   const [loading, setLoading] = useState(false);
   const [generatingType, setGeneratingType] = useState('');
@@ -72,6 +72,17 @@ const AdminReportsManagement = ({ token }) => {
   const [pagination, setPagination] = useState(null);
   const [coverageStartDate, setCoverageStartDate] = useState('');
   const [coverageEndDate, setCoverageEndDate] = useState('');
+  const notify = useCallback(
+    (message, type = 'info') => {
+      if (typeof showAlert === 'function') {
+        showAlert(message, type);
+        return;
+      }
+
+      console.warn(message);
+    },
+    [showAlert]
+  );
 
   const fetchArchives = useCallback(async () => {
     setLoading(true);
@@ -121,7 +132,7 @@ const AdminReportsManagement = ({ token }) => {
 
   const generateReport = async (reportType) => {
     if ((coverageStartDate && !coverageEndDate) || (!coverageStartDate && coverageEndDate)) {
-      window.alert('Select both coverage dates before generating a report.');
+      notify('Select both coverage dates before generating a report.', 'error');
       return;
     }
 
@@ -142,15 +153,15 @@ const AdminReportsManagement = ({ token }) => {
 
       const data = await response.json();
       if (!response.ok) {
-        window.alert(data.message || 'Failed to generate report');
+        notify(data.message || 'Failed to generate report', 'error');
         return;
       }
 
       await fetchArchives();
-      window.alert(`${data.archive?.title || 'Report'} generated and archived successfully.`);
+      notify(`${data.archive?.title || 'Report'} generated and archived successfully.`, 'success');
     } catch (error) {
       console.error('Error generating report:', error);
-      window.alert('Failed to generate report');
+      notify('Failed to generate report', 'error');
     } finally {
       setGeneratingType('');
     }
@@ -165,7 +176,7 @@ const AdminReportsManagement = ({ token }) => {
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        window.alert(data.message || 'Failed to download report');
+        notify(data.message || 'Failed to download report', 'error');
         return;
       }
 
@@ -180,7 +191,7 @@ const AdminReportsManagement = ({ token }) => {
       window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Error downloading report:', error);
-      window.alert('Failed to download report');
+      notify('Failed to download report', 'error');
     }
     setDownloadId('');
   };

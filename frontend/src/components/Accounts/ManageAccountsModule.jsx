@@ -648,9 +648,7 @@ const ManageAccountsModule = ({ showConfirm, showAlert }) => {
       return;
     }
 
-    if (window.confirm(message)) {
-      action();
-    }
+    console.warn(`Confirmation unavailable: ${message}`);
   };
 
   const handleDelete = (account) => {

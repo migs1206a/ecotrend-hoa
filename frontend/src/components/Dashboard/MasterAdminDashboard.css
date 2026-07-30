@@ -494,6 +494,16 @@
 .ma-btn-primary:hover:not(:disabled) { transform:translateY(-2px);box-shadow:0 6px 20px rgba(16,185,129,.35); }
 .ma-btn-primary:disabled { background:linear-gradient(135deg,var(--gray-300),var(--gray-200));cursor:not-allowed;box-shadow:none; }
 
+.ma-btn-danger {
+  display:flex;align-items:center;gap:.5rem;
+  padding:.75rem 1.25rem;
+  background:linear-gradient(135deg,#ef4444,#dc2626);
+  border:none;border-radius:10px;font-size:.9375rem;font-weight:600;color:var(--white);
+  cursor:pointer;transition:all .25s ease;font-family:inherit;
+  box-shadow:0 4px 12px rgba(239,68,68,.25);
+}
+.ma-btn-danger:hover { transform:translateY(-2px);box-shadow:0 6px 20px rgba(239,68,68,.35); }
+
 /* ── Responsive ───────────────────────────────── */
 @media (max-width:900px) {
   .ma-field-row { grid-template-columns:1fr; }

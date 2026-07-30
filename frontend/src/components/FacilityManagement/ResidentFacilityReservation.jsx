@@ -316,7 +316,7 @@ const ResidentFacilityReservation = ({ token, showAlert }) => {
       return;
     }
 
-    window.alert(message);
+    console.warn(message);
   }, [showAlert]);
 
   const handleSubmit = async (event) => {

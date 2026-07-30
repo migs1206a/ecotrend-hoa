@@ -9,9 +9,17 @@ const QR_CHECKPOINT_OPTIONS = [
   { value: 'gate_exit', label: 'Gate Exit' }
 ];
 
-const GuardVisitorQrPanel = ({ token, codeRequest, onRecorded }) => {
+const GuardVisitorQrPanel = ({ token, codeRequest, onRecorded, showAlert }) => {
   const [qrCheckpoint, setQrCheckpoint] = useState('gate_entry');
   const [qrTokenInput, setQrTokenInput] = useState('');
+  const notify = useCallback((message, type = 'info') => {
+    if (typeof showAlert === 'function') {
+      showAlert(message, type);
+      return;
+    }
+
+    console.warn(message);
+  }, [showAlert]);
 
   useEffect(() => {
     if (!codeRequest?.code) {
@@ -25,7 +33,7 @@ const GuardVisitorQrPanel = ({ token, codeRequest, onRecorded }) => {
     const qrToken = extractVisitorQrCredential(rawValue);
 
     if (!qrToken) {
-      window.alert('Please scan a valid QR pass or enter the short visitor code.');
+      notify('Please scan a valid QR pass or enter the short visitor code.', 'error');
       return false;
     }
 
@@ -41,19 +49,19 @@ const GuardVisitorQrPanel = ({ token, codeRequest, onRecorded }) => {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        window.alert(data.message || 'Failed to record QR checkpoint.');
+        notify(data.message || 'Failed to record QR checkpoint.', 'error');
         return false;
       }
 
-      window.alert(data.message || 'QR checkpoint recorded.');
+      notify(data.message || 'QR checkpoint recorded.', 'success');
       setQrTokenInput('');
       onRecorded?.();
       return true;
     } catch (error) {
-      window.alert('Failed to record QR checkpoint.');
+      notify('Failed to record QR checkpoint.', 'error');
       return false;
     }
-  }, [onRecorded, qrCheckpoint, token]);
+  }, [notify, onRecorded, qrCheckpoint, token]);
 
   const {
     scannerActive,
@@ -64,7 +72,7 @@ const GuardVisitorQrPanel = ({ token, codeRequest, onRecorded }) => {
     containerId: 'guard-visitor-qr-scanner',
     onScanSuccess: submitQrScan,
     onStartError: (message) => {
-      window.alert(message || 'Unable to open camera for QR scanning.');
+      notify(message || 'Unable to open camera for QR scanning.', 'error');
     }
   });
 

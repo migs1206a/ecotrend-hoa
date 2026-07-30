@@ -52,9 +52,13 @@ const MasterAdminDashboard = ({ onLogout }) => {
   // ── View modal state ───────────────────────────────────────
   const [viewModal, setViewModal] = useState(false);
   const [viewTarget, setViewTarget] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [noticeDialog, setNoticeDialog] = useState({ open: false, type: 'info', message: '' });
 
   const token = () => localStorage.getItem('token');
   const preventCopyPaste = (e) => e.preventDefault();
+  const showNotice = (message, type = 'info') => setNoticeDialog({ open: true, type, message });
+  const closeNotice = () => setNoticeDialog({ open: false, type: 'info', message: '' });
 
   // ── Fetch accounts ─────────────────────────────────────────
   const fetchAccounts = async () => {
@@ -145,7 +149,13 @@ const MasterAdminDashboard = ({ onLogout }) => {
 
   // ── DELETE ─────────────────────────────────────────────────
   const handleDelete = async (acc) => {
-    if (!window.confirm(`Delete ${acc.role} account "@${acc.username}"?\nThis cannot be undone.`)) return;
+    setDeleteTarget(acc);
+  };
+
+  const confirmDelete = async () => {
+    const acc = deleteTarget;
+    if (!acc) return;
+
     try {
       const endpoint = acc.role === 'ADMIN'
         ? `${API}/admin/${acc._id}` : `${API}/guard/${acc._id}`;
@@ -154,8 +164,9 @@ const MasterAdminDashboard = ({ onLogout }) => {
         headers: { Authorization: `Bearer ${token()}` }
       });
       if (res.ok) setAccounts(prev => prev.filter(a => a._id !== acc._id));
-      else alert('Failed to delete account.');
-    } catch { alert('Connection error.'); }
+      else showNotice('Failed to delete account.', 'error');
+    } catch { showNotice('Connection error.', 'error'); }
+    finally { setDeleteTarget(null); }
   };
 
   // ── Open EDIT modal ────────────────────────────────────────
@@ -700,6 +711,47 @@ const MasterAdminDashboard = ({ onLogout }) => {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="ma-modal-overlay" onClick={() => setDeleteTarget(null)}>
+          <div className="ma-modal" onClick={e => e.stopPropagation()}>
+            <div className="ma-modal-header">
+              <h2 className="ma-modal-title">Confirm Delete</h2>
+              <button className="ma-modal-close" onClick={() => setDeleteTarget(null)}><X size={20} /></button>
+            </div>
+            <div className="ma-modal-body">
+              <div className="ma-alert ma-alert-error">
+                <XCircle size={18} />
+                <span>Delete {deleteTarget.role} account "@{deleteTarget.username}"? This cannot be undone.</span>
+              </div>
+              <div className="ma-modal-footer">
+                <button className="ma-btn-secondary" onClick={() => setDeleteTarget(null)}>Cancel</button>
+                <button className="ma-btn-danger" onClick={confirmDelete}><Trash2 size={15} />Delete Account</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {noticeDialog.open && (
+        <div className="ma-modal-overlay" onClick={closeNotice}>
+          <div className="ma-modal" onClick={e => e.stopPropagation()}>
+            <div className="ma-modal-header">
+              <h2 className="ma-modal-title">{noticeDialog.type === 'error' ? 'Error' : 'Notice'}</h2>
+              <button className="ma-modal-close" onClick={closeNotice}><X size={20} /></button>
+            </div>
+            <div className="ma-modal-body">
+              <div className={`ma-alert ${noticeDialog.type === 'error' ? 'ma-alert-error' : 'ma-alert-success'}`}>
+                {noticeDialog.type === 'error' ? <XCircle size={18} /> : <CheckCircle size={18} />}
+                <span>{noticeDialog.message}</span>
+              </div>
+              <div className="ma-modal-footer">
+                <button className="ma-btn-primary" onClick={closeNotice}>OK</button>
+              </div>
             </div>
           </div>
         </div>

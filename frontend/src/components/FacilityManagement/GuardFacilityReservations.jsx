@@ -32,7 +32,7 @@ const FACILITY_QR_CHECKPOINT_OPTIONS = [
   { value: 'gate_exit', label: 'Gate Exit' }
 ];
 
-const GuardFacilityReservations = ({ token }) => {
+const GuardFacilityReservations = ({ token, showAlert, showConfirm }) => {
   const [reservations, setReservations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -42,6 +42,28 @@ const GuardFacilityReservations = ({ token }) => {
   const [viewMode, setViewMode] = useState('card');
   const [qrCheckpoint, setQrCheckpoint] = useState('gate_entry');
   const [qrTokenInput, setQrTokenInput] = useState('');
+  const notify = useCallback(
+    (message, type = 'info') => {
+      if (typeof showAlert === 'function') {
+        showAlert(message, type);
+        return;
+      }
+
+      console.warn(message);
+    },
+    [showAlert]
+  );
+  const confirmAction = useCallback(
+    (message, onConfirm) => {
+      if (typeof showConfirm === 'function') {
+        showConfirm(message, onConfirm);
+        return;
+      }
+
+      console.warn(`Confirmation unavailable: ${message}`);
+    },
+    [showConfirm]
+  );
 
   useEffect(() => {
     setPage(1);
@@ -78,7 +100,7 @@ const GuardFacilityReservations = ({ token }) => {
     const qrToken = extractFacilityGuestQrToken(rawValue);
 
     if (!qrToken) {
-      window.alert('Please scan a valid facility guest QR pass or enter the guest code.');
+      notify('Please scan a valid facility guest QR pass or enter the guest code.', 'error');
       return false;
     }
 
@@ -94,20 +116,20 @@ const GuardFacilityReservations = ({ token }) => {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        window.alert(data.message || 'Failed to record the facility guest checkpoint.');
+        notify(data.message || 'Failed to record the facility guest checkpoint.', 'error');
         return false;
       }
 
-      window.alert(data.message || 'Facility guest checkpoint recorded.');
+      notify(data.message || 'Facility guest checkpoint recorded.', 'success');
       setQrTokenInput('');
       fetchReservations();
       return true;
     } catch (error) {
       console.error('Error scanning facility guest QR:', error);
-      window.alert('Failed to record the facility guest checkpoint.');
+      notify('Failed to record the facility guest checkpoint.', 'error');
       return false;
     }
-  }, [fetchReservations, qrCheckpoint, token]);
+  }, [fetchReservations, notify, qrCheckpoint, token]);
 
   const {
     scannerActive: qrScannerActive,
@@ -119,7 +141,7 @@ const GuardFacilityReservations = ({ token }) => {
     onScanSuccess: submitQrScan,
     onStartError: (message) => {
       console.error('Error starting facility QR scanner:', message);
-      window.alert(message || 'Unable to open camera for facility QR scanning.');
+      notify(message || 'Unable to open camera for facility QR scanning.', 'error');
     }
   });
 
@@ -127,42 +149,41 @@ const GuardFacilityReservations = ({ token }) => {
     const accessCode = getFacilityGuestQrAccessCode(reservation);
 
     if (!accessCode) {
-      window.alert('No facility guest code is available for this reservation yet.');
+      notify('No facility guest code is available for this reservation yet.', 'error');
       return;
     }
 
     setQrTokenInput(accessCode);
-    window.alert('Facility guest code loaded into the scanner field.');
+    notify('Facility guest code loaded into the scanner field.', 'success');
   };
 
   const handleForgottenQrCheckpoint = async (reservation, checkpoint) => {
     const checkpointLabel = checkpoint === 'gate_entry' ? 'Gate Entrance' : 'Gate Exit';
-    if (!window.confirm(`Bypass the forgotten ${checkpointLabel} scan for this reservation?`)) {
-      return;
-    }
+    confirmAction(`Bypass the forgotten ${checkpointLabel} scan for this reservation?`, async () => {
 
-    try {
-      const response = await fetch(apiUrl(`/facilities/${reservation._id}/qr/forgot`), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ checkpoint })
-      });
-      const data = await response.json().catch(() => ({}));
+      try {
+        const response = await fetch(apiUrl(`/facilities/${reservation._id}/qr/forgot`), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ checkpoint })
+        });
+        const data = await response.json().catch(() => ({}));
 
-      if (!response.ok) {
-        window.alert(data.message || `Failed to bypass ${checkpointLabel}.`);
-        return;
+        if (!response.ok) {
+          notify(data.message || `Failed to bypass ${checkpointLabel}.`, 'error');
+          return;
+        }
+
+        notify(data.message || `${checkpointLabel} bypassed successfully.`, 'success');
+        fetchReservations();
+      } catch (error) {
+        console.error('Error bypassing facility QR checkpoint:', error);
+        notify(`Failed to bypass ${checkpointLabel}.`, 'error');
       }
-
-      window.alert(data.message || `${checkpointLabel} bypassed successfully.`);
-      fetchReservations();
-    } catch (error) {
-      console.error('Error bypassing facility QR checkpoint:', error);
-      window.alert(`Failed to bypass ${checkpointLabel}.`);
-    }
+    });
   };
 
   useEffect(() => {
