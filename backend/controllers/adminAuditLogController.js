@@ -82,19 +82,6 @@ const formatDateForFileName = (value = new Date()) => {
   ].join('');
 };
 
-const getStatusLabel = (statusCode) => {
-  const code = Number(statusCode) || 0;
-
-  if (code === 200) return 'OK';
-  if (code === 201) return 'Created';
-  if (code === 202) return 'Accepted';
-  if (code === 204) return 'No Content';
-  if (code >= 400 && code < 500) return 'Client Error';
-  if (code >= 500) return 'Server Error';
-
-  return 'Success';
-};
-
 const getActorDisplayName = (actor = {}) =>
   String(actor.firstName || actor.fullName || actor.username || 'Officer').trim() || 'Officer';
 
@@ -102,20 +89,7 @@ const getActorRoleLabel = (actor = {}) =>
   String(actor.position || actor.role || actor.accountType || 'Officer').trim() || 'Officer';
 
 const buildRequestSummary = (log = {}) => {
-  const method = String(log.method || '').trim().toUpperCase();
-  const endpoint = String(log.endpoint || '').trim();
-  const code = Number(log.statusCode) || 0;
-  const statusLabel = getStatusLabel(code);
-
-  if (method && endpoint) {
-    return `${method} ${endpoint} (${code || '-'} ${statusLabel})`;
-  }
-
-  if (endpoint) {
-    return `${endpoint} (${code || '-'} ${statusLabel})`;
-  }
-
-  return `${code || '-'} ${statusLabel}`;
+  return log.eventType === 'access' ? 'Module opened' : 'Action completed';
 };
 
 const buildAdminAuditPdfScope = (query = {}) => {

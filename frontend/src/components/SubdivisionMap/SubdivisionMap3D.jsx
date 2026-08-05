@@ -15,6 +15,7 @@ import {
   LockKeyhole,
   Map as MapIcon,
   MapPin,
+  Moon,
   MousePointer2,
   Navigation,
   Network,
@@ -24,6 +25,7 @@ import {
   RotateCw,
   Search,
   Shield,
+  Sun,
   Tags,
   Users,
   ZoomIn
@@ -446,14 +448,15 @@ const drawPinIcon = (context, center, type, size) => {
 };
 
 const drawSubdivisionMap = (context, width, height, options) => {
-  const { layer, zoom, rotation, showLabels, selectedId } = options;
+  const { layer, zoom, rotation, showLabels, selectedId, sceneMode } = options;
+  const isNight = sceneMode === 'night';
   const project = createProjector(width, height, zoom, rotation);
   context.clearRect(0, 0, width, height);
 
   const background = context.createLinearGradient(0, 0, 0, height);
-  background.addColorStop(0, '#0d1b2a');
-  background.addColorStop(0.52, '#143d33');
-  background.addColorStop(1, '#ecfdf5');
+  background.addColorStop(0, isNight ? '#06111f' : '#0d1b2a');
+  background.addColorStop(0.52, isNight ? '#10243c' : '#143d33');
+  background.addColorStop(1, isNight ? '#10251f' : '#ecfdf5');
   context.fillStyle = background;
   context.fillRect(0, 0, width, height);
 
@@ -465,7 +468,7 @@ const drawSubdivisionMap = (context, width, height, options) => {
     height * 0.18,
     width * 0.48
   );
-  skyGlow.addColorStop(0, 'rgba(255, 255, 255, 0.28)');
+  skyGlow.addColorStop(0, isNight ? 'rgba(164, 196, 255, 0.16)' : 'rgba(255, 255, 255, 0.28)');
   skyGlow.addColorStop(1, 'rgba(255, 255, 255, 0)');
   context.save();
   context.scale(1, 0.58);
@@ -487,15 +490,15 @@ const drawSubdivisionMap = (context, width, height, options) => {
 
   polygonPath(context, groundCorners);
   const groundGradient = context.createLinearGradient(0, 0, width, height);
-  groundGradient.addColorStop(0, '#b9d9ad');
-  groundGradient.addColorStop(1, '#5f9a70');
+  groundGradient.addColorStop(0, isNight ? '#315342' : '#b9d9ad');
+  groundGradient.addColorStop(1, isNight ? '#1a3528' : '#5f9a70');
   context.fillStyle = groundGradient;
   context.fill();
-  context.strokeStyle = 'rgba(255, 255, 255, 0.48)';
+  context.strokeStyle = isNight ? 'rgba(148, 163, 184, 0.34)' : 'rgba(255, 255, 255, 0.48)';
   context.lineWidth = 2;
   context.stroke();
 
-  context.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+  context.strokeStyle = isNight ? 'rgba(148, 163, 184, 0.12)' : 'rgba(255, 255, 255, 0.18)';
   context.lineWidth = 1;
   for (let index = 1; index < 11; index += 1) {
     const x = index * 0.1;
@@ -519,9 +522,9 @@ const drawSubdivisionMap = (context, width, height, options) => {
   ZONES.forEach((zone) => {
     const active = layerMatches(layer, zone.category);
     polygonPath(context, zone.points.map(project));
-    context.fillStyle = colorWithAlpha(zone.color, active ? 0.2 : 0.06);
+    context.fillStyle = colorWithAlpha(zone.color, isNight ? (active ? 0.14 : 0.04) : (active ? 0.2 : 0.06));
     context.fill();
-    context.strokeStyle = colorWithAlpha(zone.color, active ? 0.62 : 0.22);
+    context.strokeStyle = colorWithAlpha(zone.color, isNight ? (active ? 0.46 : 0.16) : (active ? 0.62 : 0.22));
     context.lineWidth = active ? 2 : 1;
     context.stroke();
   });
@@ -562,7 +565,9 @@ const drawSubdivisionMap = (context, width, height, options) => {
   houses.sort((first, second) => project(first.center)[1] - project(second.center)[1]);
   const residentialActive = layerMatches(layer, 'residential');
   houses.forEach((house) => {
-    const alpha = residentialActive ? 0.96 : 0.34;
+    const alpha = isNight
+      ? (residentialActive ? 0.82 : 0.26)
+      : (residentialActive ? 0.96 : 0.34);
     const houseWidth = house.variant % 2 === 0 ? 0.023 : 0.020;
     const houseDepth = house.variant === 3 ? 0.022 : 0.018;
     const wallColor = mixColor(house.color, '#fff4da', house.variant * 0.08);
@@ -600,13 +605,13 @@ const drawSubdivisionMap = (context, width, height, options) => {
     points.slice(1).forEach((point) => context.lineTo(...point));
     context.lineCap = 'round';
     context.lineJoin = 'round';
-    context.strokeStyle = 'rgba(0, 0, 0, 0.22)';
+    context.strokeStyle = isNight ? 'rgba(0, 0, 0, 0.36)' : 'rgba(0, 0, 0, 0.22)';
     context.lineWidth = road.width + 7;
     context.stroke();
-    context.strokeStyle = colorWithAlpha(road.color, active ? 0.94 : 0.34);
+    context.strokeStyle = colorWithAlpha(isNight ? '#334155' : road.color, active ? (isNight ? 0.86 : 0.94) : 0.34);
     context.lineWidth = road.width;
     context.stroke();
-    context.strokeStyle = `rgba(255, 255, 255, ${active ? 0.46 : 0.16})`;
+    context.strokeStyle = `rgba(255, 255, 255, ${active ? (isNight ? 0.26 : 0.46) : 0.16})`;
     context.lineWidth = 1.4;
     context.stroke();
 
@@ -614,7 +619,7 @@ const drawSubdivisionMap = (context, width, height, options) => {
     if (shouldLabel) {
       const anchor = project(road.points[Math.floor(road.points.length / 2)]);
       context.save();
-      context.fillStyle = `rgba(255, 255, 255, ${active ? 0.92 : 0.38})`;
+      context.fillStyle = `rgba(255, 255, 255, ${active ? (isNight ? 0.76 : 0.92) : 0.38})`;
       context.font = `900 ${width < 600 ? 6.5 : 8}px Arial, sans-serif`;
       context.textAlign = 'center';
       context.textBaseline = 'middle';
@@ -625,8 +630,36 @@ const drawSubdivisionMap = (context, width, height, options) => {
     }
   });
 
+  if (isNight) {
+    ROADS.filter((road) => road.width >= 8).forEach((road, roadIndex) => {
+      road.points.forEach((point, pointIndex) => {
+        if ((roadIndex + pointIndex) % 2 !== 0) return;
+        const [x, y] = project(point);
+        const glow = context.createRadialGradient(x, y - 8, 0, x, y - 8, 24);
+        glow.addColorStop(0, 'rgba(253, 230, 138, 0.28)');
+        glow.addColorStop(1, 'rgba(253, 230, 138, 0)');
+        context.fillStyle = glow;
+        context.beginPath();
+        context.arc(x, y - 8, 24, 0, Math.PI * 2);
+        context.fill();
+        context.strokeStyle = 'rgba(71, 85, 105, 0.8)';
+        context.lineWidth = 1.2;
+        context.beginPath();
+        context.moveTo(x, y);
+        context.lineTo(x, y - 8);
+        context.stroke();
+        context.fillStyle = '#fde68a';
+        context.beginPath();
+        context.arc(x, y - 9, 2.2, 0, Math.PI * 2);
+        context.fill();
+      });
+    });
+  }
+
   const landscapeActive = ['overview', 'residential', 'facilities'].includes(layer);
-  const treeAlpha = landscapeActive ? 0.92 : 0.32;
+  const treeAlpha = isNight
+    ? (landscapeActive ? 0.68 : 0.24)
+    : (landscapeActive ? 0.92 : 0.32);
   const drawTree = (point, treeHeight, alpha) => {
     const base = project(point);
     const top = [base[0], base[1] - treeHeight];
@@ -640,11 +673,11 @@ const drawSubdivisionMap = (context, width, height, options) => {
     context.beginPath();
     context.arc(top[0] + 1.5, top[1] + 1.5, 5.5, 0, Math.PI * 2);
     context.fill();
-    context.fillStyle = colorWithAlpha('#236a45', alpha);
+    context.fillStyle = colorWithAlpha(isNight ? '#194936' : '#236a45', alpha);
     context.beginPath();
     context.arc(...top, 5.2, 0, Math.PI * 2);
     context.fill();
-    context.fillStyle = colorWithAlpha('#55a867', alpha);
+    context.fillStyle = colorWithAlpha(isNight ? '#2f7850' : '#55a867', alpha);
     context.beginPath();
     context.arc(top[0] - 1.5, top[1] - 1.5, 3.4, 0, Math.PI * 2);
     context.fill();
@@ -849,6 +882,7 @@ const MapCanvas = ({
   zoom,
   rotation,
   showLabels,
+  sceneMode,
   selectedLocation,
   onLocationSelected,
   onRotationChanged
@@ -879,9 +913,10 @@ const MapCanvas = ({
       zoom,
       rotation,
       showLabels,
-      selectedId: selectedLocation.id
+      selectedId: selectedLocation.id,
+      sceneMode
     });
-  }, [layer, rotation, selectedLocation.id, showLabels, zoom]);
+  }, [layer, rotation, sceneMode, selectedLocation.id, showLabels, zoom]);
 
   useEffect(() => {
     paint();
@@ -957,7 +992,7 @@ const MapCanvas = ({
   return (
     <div
       ref={frameRef}
-      className="smap-canvas-frame"
+      className={`smap-canvas-frame ${sceneMode === 'night' ? 'night' : 'day'}`}
       role="img"
       aria-label={`Interactive 3D subdivision map. ${LAYERS[layer].label} layer. ${selectedLocation.label} selected.`}
       aria-description="Tap a landmark to select it. Drag horizontally to rotate. Use the zoom control to change scale."
@@ -1102,6 +1137,7 @@ const SubdivisionMap3D = ({ role = 'Admin' }) => {
   const [rotation, setRotation] = useState(-0.42);
   const [selectedId, setSelectedId] = useState('main-gate');
   const [showLabels, setShowLabels] = useState(true);
+  const [sceneMode, setSceneMode] = useState('day');
 
   const visibleLocations = useMemo(
     () => LOCATIONS.filter((location) => layerMatches(layer, location.category)),
@@ -1128,6 +1164,7 @@ const SubdivisionMap3D = ({ role = 'Admin' }) => {
     setLayer('overview');
     setSelectedId('main-gate');
     setShowLabels(true);
+    setSceneMode('day');
   };
 
   return (
@@ -1209,6 +1246,15 @@ const SubdivisionMap3D = ({ role = 'Admin' }) => {
               </button>
               <button
                 type="button"
+                className={`smap-mode-toggle ${sceneMode === 'night' ? 'active' : ''}`}
+                aria-pressed={sceneMode === 'night'}
+                onClick={() => setSceneMode((value) => (value === 'day' ? 'night' : 'day'))}
+              >
+                {sceneMode === 'night' ? <Moon size={17} /> : <Sun size={17} />}
+                <span>{sceneMode === 'night' ? 'Night' : 'Day'}</span>
+              </button>
+              <button
+                type="button"
                 className={`smap-label-toggle ${showLabels ? 'active' : ''}`}
                 aria-pressed={showLabels}
                 onClick={() => setShowLabels((value) => !value)}
@@ -1224,6 +1270,7 @@ const SubdivisionMap3D = ({ role = 'Admin' }) => {
             zoom={zoom}
             rotation={rotation}
             showLabels={showLabels}
+            sceneMode={sceneMode}
             selectedLocation={selectedLocation}
             onLocationSelected={setSelectedId}
             onRotationChanged={setRotation}

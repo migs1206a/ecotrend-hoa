@@ -182,32 +182,68 @@ const formatAccountSubject = (account = {}, target = {}) => {
   return subjectParts.join(' - ');
 };
 
-const getChangedFieldLabels = (req, moduleKey = '') => {
-  if (moduleKey !== 'manage_accounts') {
-    return [];
+const normalizeAuditValue = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean).sort();
   }
 
-  const method = String(req?.method || '').toUpperCase();
-  if (!['PUT', 'PATCH'].includes(method)) {
+  return String(value ?? '').trim();
+};
+
+const auditValuesMatch = (first, second) =>
+  JSON.stringify(normalizeAuditValue(first)) === JSON.stringify(normalizeAuditValue(second));
+
+const formatAuditValue = (field, value) => {
+  if (field === 'modules') {
+    const modules = Array.isArray(value) ? value : [];
+    return modules.length > 0
+      ? modules.map((moduleKey) => getAuditModuleLabel(moduleKey)).join(', ')
+      : 'No modules';
+  }
+
+  if (field === 'position') {
+    return toTitleCase(value) || 'Not assigned';
+  }
+
+  if (field === 'isApproved') {
+    return value ? 'Approved' : 'Not approved';
+  }
+
+  return String(value ?? '').trim() || 'Empty';
+};
+
+const getManageAccountChangeDetails = (req, target, account = {}) => {
+  if (!target || !['PUT', 'PATCH'].includes(String(req?.method || '').toUpperCase())) {
     return [];
   }
 
   const body = req?.body && typeof req.body === 'object' ? req.body : {};
+  const fields = target.targetKey === 'admin'
+    ? ['username', 'fullName', 'position', 'modules']
+    : target.targetKey === 'guard'
+      ? ['username', 'fullName', 'modules']
+      : ['username', 'familyName'];
+  const before = req.auditLogBefore || {};
 
-  return Object.keys(body)
+  return fields
     .filter((field) => !SENSITIVE_CHANGED_FIELDS.has(field))
     .filter((field) => body[field] !== undefined)
-    .map((field) => CHANGED_FIELD_LABELS[field] || toTitleCase(field))
-    .filter(Boolean)
+    .filter((field) => !auditValuesMatch(before[field], account[field] ?? body[field]))
+    .map((field) => {
+      const label = CHANGED_FIELD_LABELS[field] || toTitleCase(field);
+      const previousValue = formatAuditValue(field, before[field]);
+      const nextValue = formatAuditValue(field, account[field] ?? body[field]);
+      return `${label} changed from "${previousValue}" to "${nextValue}"`;
+    })
     .slice(0, 8);
 };
 
-const appendChangedFields = (description, changedFields = []) => {
-  if (!Array.isArray(changedFields) || changedFields.length === 0) {
+const appendChangedDetails = (description, changedDetails = []) => {
+  if (!Array.isArray(changedDetails) || changedDetails.length === 0) {
     return description;
   }
 
-  return `${description}; changed: ${changedFields.join(', ')}`;
+  return `${description}. Changes: ${changedDetails.join('; ')}.`;
 };
 
 const getAuditLogRetentionDays = () => ADMIN_AUDIT_LOG_RETENTION_DAYS;
@@ -269,7 +305,7 @@ const resolveManageAccountSubject = async (target) => {
 
   try {
     const account = await target.model.findById(target.subjectId)
-      .select('username fullName familyName')
+      .select('username fullName familyName position modules')
       .lean();
 
     if (!account) {
@@ -281,6 +317,7 @@ const resolveManageAccountSubject = async (target) => {
     return subject
       ? {
           subject,
+          account,
           metadata: {
             subjectId: target.subjectId,
             subjectRole: target.subjectRole,
@@ -297,18 +334,21 @@ const resolveManageAccountSubject = async (target) => {
 
 const resolveAuditSubject = async (req, moduleKey = '', endpoint = '') => {
   const manageAccountTarget = extractManageAccountTarget(moduleKey, endpoint);
-  const changedFields = getChangedFieldLabels(req, moduleKey);
-  const changedFieldsMetadata = changedFields.length > 0 ? { changedFields } : {};
 
   if (manageAccountTarget) {
     const resolvedManageAccountSubject = await resolveManageAccountSubject(manageAccountTarget);
     if (resolvedManageAccountSubject?.subject) {
+      const changedDetails = getManageAccountChangeDetails(
+        req,
+        manageAccountTarget,
+        resolvedManageAccountSubject.account
+      );
       return {
         subject: resolvedManageAccountSubject.subject,
         metadata: {
           subject: resolvedManageAccountSubject.subject,
           ...resolvedManageAccountSubject.metadata,
-          ...changedFieldsMetadata
+          ...(changedDetails.length > 0 ? { changedDetails } : {})
         }
       };
     }
@@ -319,8 +359,7 @@ const resolveAuditSubject = async (req, moduleKey = '', endpoint = '') => {
     return {
       subject: bodySubject,
       metadata: {
-        subject: bodySubject,
-        ...changedFieldsMetadata
+        subject: bodySubject
       }
     };
   }
@@ -331,7 +370,6 @@ const resolveAuditSubject = async (req, moduleKey = '', endpoint = '') => {
       subject: subjectId,
       metadata: {
         subject: subjectId,
-        ...changedFieldsMetadata,
         ...(manageAccountTarget?.subjectRole
           ? {
               subjectId: manageAccountTarget.subjectId,
@@ -558,6 +596,26 @@ const createAdminAuditLogger = () => (req, res, next) => {
 
   req.adminAuditLoggerAttached = true;
 
+  const captureBefore = async () => {
+    if (!['PUT', 'PATCH'].includes(String(req.method || '').toUpperCase())) {
+      return;
+    }
+
+    const endpoint = String(req.originalUrl || req.baseUrl || req.url || '/').split('?')[0];
+    const target = extractManageAccountTarget('manage_accounts', endpoint);
+    if (!target) {
+      return;
+    }
+
+    try {
+      req.auditLogBefore = await target.model.findById(target.subjectId)
+        .select('username fullName familyName position modules')
+        .lean();
+    } catch (error) {
+      console.error('Capture admin audit snapshot error:', error.message);
+    }
+  };
+
   res.on('finish', async () => {
     if (!req.user || !isOfficer(req.user)) {
       return;
@@ -586,7 +644,7 @@ const createAdminAuditLogger = () => (req, res, next) => {
       moduleKey,
       subject
     });
-    const description = appendChangedFields(details.description, subjectMetadata.changedFields);
+    const description = appendChangedDetails(details.description, subjectMetadata.changedDetails);
 
     void createAdminAuditLog({
       user: req.user,
@@ -606,7 +664,7 @@ const createAdminAuditLogger = () => (req, res, next) => {
     });
   });
 
-  return next();
+  void captureBefore().finally(() => next());
 };
 
 module.exports = {

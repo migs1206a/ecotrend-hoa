@@ -423,7 +423,8 @@
   transform: translateY(-1px);
 }
 
-.smap-camera-buttons .smap-label-toggle {
+.smap-camera-buttons .smap-label-toggle,
+.smap-camera-buttons .smap-mode-toggle {
   width: auto;
   min-width: 88px;
   gap: 0.4rem;
@@ -432,9 +433,15 @@
   font-size: 0.78rem;
 }
 
-.smap-camera-buttons .smap-label-toggle.active {
+.smap-camera-buttons .smap-label-toggle.active,
+.smap-camera-buttons .smap-mode-toggle.active {
   border-color: transparent;
   background: #d4eadc;
+}
+
+.smap-camera-buttons .smap-mode-toggle.active {
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 
 .smap-canvas-frame {
@@ -447,6 +454,14 @@
   border-radius: 20px;
   background: #0d1b2a;
   isolation: isolate;
+}
+
+.smap-canvas-frame.day {
+  background: #0d1b2a;
+}
+
+.smap-canvas-frame.night {
+  background: #06111f;
 }
 
 .smap-canvas {
@@ -1042,7 +1057,8 @@
     height: 38px;
   }
 
-  .smap-camera-buttons .smap-label-toggle {
+  .smap-camera-buttons .smap-label-toggle,
+  .smap-camera-buttons .smap-mode-toggle {
     flex: 1 1 88px;
   }
 

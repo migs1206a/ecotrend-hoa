@@ -42,19 +42,9 @@ const formatDateTime = (value) => {
   return Number.isNaN(date.getTime()) ? 'No timestamp' : date.toLocaleString();
 };
 
-const getHttpStatusLabel = (statusCode) => {
-  const code = Number(statusCode) || 0;
-
-  if (code === 200) return 'OK';
-  if (code === 201) return 'Created';
-  if (code === 202) return 'Accepted';
-  if (code === 204) return 'No Content';
-  if (code >= 400 && code < 500) return 'Client Error';
-  if (code >= 500) return 'Server Error';
-  return 'Success';
-};
-
 const formatRequestMeta = (log = {}) => {
+  return log.eventType === 'access' ? 'Module opened' : 'Action completed';
+  /*
   const code = Number(log.statusCode) || 0;
   const statusLabel = getHttpStatusLabel(code);
 
@@ -66,6 +56,7 @@ const formatRequestMeta = (log = {}) => {
   return method
     ? `${method} · ${statusLabel} (${code || '-'})`
     : `${statusLabel} (${code || '-'})`;
+  */
 };
 
 const AdminAuditLogs = ({ token, showAlert }) => {
