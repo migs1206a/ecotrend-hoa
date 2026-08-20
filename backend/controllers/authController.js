@@ -28,8 +28,9 @@ const {
   IMAGE_UPLOAD_MAX_BYTES
 } = require('../utils/uploadLimits');
 const { isSoftDeleted } = require('../utils/accountLifecycle');
+const { getJwtSecret } = require('../utils/jwtSecret');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+const JWT_SECRET = getJwtSecret();
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1h';
 
 const normalizePlateNumber = (value) => {

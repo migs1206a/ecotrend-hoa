@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const { getJwtSecret } = require('./jwtSecret');
 
 const VALID_EMAIL_PROVIDERS = [
   'gmail.com',
@@ -18,7 +19,7 @@ const EMAIL_OTP_EXPIRY_MINUTES = 10;
 const EMAIL_OTP_RESEND_COOLDOWN_SECONDS = 60;
 const EMAIL_VERIFICATION_PURPOSE = 'resident-email-verification';
 const EMAIL_VERIFICATION_TOKEN_TTL = '30m';
-const EMAIL_VERIFICATION_SECRET = process.env.EMAIL_VERIFICATION_SECRET || process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+const EMAIL_VERIFICATION_SECRET = process.env.EMAIL_VERIFICATION_SECRET || getJwtSecret();
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 

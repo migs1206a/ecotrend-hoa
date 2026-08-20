@@ -19,6 +19,33 @@ if (configuredDnsServers.length) {
 }
 
 const app = express();
+const isProduction = process.env.NODE_ENV === 'production';
+
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader(
+    'Permissions-Policy',
+    'camera=(self), geolocation=(), microphone=(), payment=()',
+  );
+
+  if (isProduction) {
+    res.setHeader(
+      'Strict-Transport-Security',
+      'max-age=31536000; includeSubDomains',
+    );
+    res.setHeader(
+      'Content-Security-Policy',
+      "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+    );
+  }
+
+  next();
+});
 
 const configuredFrontendUrls = String(process.env.FRONTEND_URL || '')
   .split(',')
@@ -155,9 +182,20 @@ app.get('/', (req, res) => {
   });
 });
 
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
+
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({ message: 'Request origin is not allowed.' });
+  }
   
   // Handle multer errors
   if (err.name === 'MulterError') {

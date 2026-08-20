@@ -25,6 +25,7 @@ const {
 const { appendResidentComputedFields } = require('../utils/residentAccounts');
 const { getAuditModuleLabel, setAuditLogContext } = require('../utils/adminAuditLog');
 const { normalizeSpaces, validateNameField } = require('../utils/fieldValidation');
+const { getJwtSecret } = require('../utils/jwtSecret');
 
 const router = express.Router();
 
@@ -33,7 +34,7 @@ router.use((req, res, next) => {
   next();
 });
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+const JWT_SECRET = getJwtSecret();
 const ADMIN_ASSIGNABLE_POSITIONS = [
   OFFICER_POSITIONS.VICE_PRESIDENT,
   OFFICER_POSITIONS.SECRETARY,
