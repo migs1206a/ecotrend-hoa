@@ -92,15 +92,19 @@ const getFirebaseApp = () => {
 
   const serviceAccount = parseFirebaseServiceAccount();
   if (serviceAccount) {
-    return initializeApp({
+    const app = initializeApp({
       credential: cert(serviceAccount)
     });
+    console.log('[push] Firebase Admin initialized for notification delivery.');
+    return app;
   }
 
   if (String(process.env.FIREBASE_USE_APPLICATION_DEFAULT || '').trim().toLowerCase() === 'true') {
-    return initializeApp({
+    const app = initializeApp({
       credential: applicationDefault()
     });
+    console.log('[push] Firebase Admin initialized with application default credentials.');
+    return app;
   }
 
   return null;
@@ -195,6 +199,7 @@ const dispatchPushNotification = async (notification) => {
   });
 
   if (!targetMatch) {
+    console.warn('[push] Delivery skipped: notification has no target audience.');
     return {
       enabled: false,
       reason: 'No target audience'
@@ -203,6 +208,7 @@ const dispatchPushNotification = async (notification) => {
 
   const firebaseApp = getFirebaseApp();
   if (!firebaseApp) {
+    console.warn('[push] Delivery skipped: Firebase Admin credentials are not configured.');
     return {
       enabled: false,
       reason: 'Firebase Admin is not configured'
@@ -225,6 +231,7 @@ const dispatchPushNotification = async (notification) => {
   ];
 
   if (tokens.length === 0) {
+    console.warn('[push] Delivery skipped: no active device tokens matched the notification audience.');
     return {
       enabled: true,
       sent: 0,
@@ -234,7 +241,10 @@ const dispatchPushNotification = async (notification) => {
 
   const payloadData = buildPushPayloadData(notification);
   const invalidTokens = [];
+  const failureCodes = new Map();
   let successCount = 0;
+
+  console.log(`[push] Attempting delivery to ${tokens.length} active device(s).`);
 
   for (const batch of chunkList(tokens, 500)) {
     const response = await getMessaging(firebaseApp).sendEachForMulticast({
@@ -260,6 +270,9 @@ const dispatchPushNotification = async (notification) => {
       }
 
       const errorCode = String(entry.error?.code || '').trim();
+      if (errorCode) {
+        failureCodes.set(errorCode, (failureCodes.get(errorCode) || 0) + 1);
+      }
       if (INVALID_FCM_TOKEN_CODES.has(errorCode)) {
         invalidTokens.push(batch[index]);
       }
@@ -269,6 +282,15 @@ const dispatchPushNotification = async (notification) => {
   if (invalidTokens.length > 0) {
     await deactivateInvalidTokens(invalidTokens);
   }
+
+  const failedCount = tokens.length - successCount;
+  const failureSummary = [...failureCodes.entries()]
+    .map(([code, count]) => `${code}:${count}`)
+    .join(', ');
+  console.log(
+    `[push] Delivery result: ${successCount} sent, ${failedCount} failed, ${invalidTokens.length} invalid token(s)` +
+      (failureSummary ? `; errors ${failureSummary}` : ''),
+  );
 
   return {
     enabled: true,

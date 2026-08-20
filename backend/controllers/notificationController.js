@@ -104,6 +104,10 @@ const registerDeviceToken = async (req, res) => {
       }
     );
 
+    console.log(
+      `[push] Device token registered for ${role} on ${platform || 'android'}.`,
+    );
+
     return res.json({
       message: 'Push device registered.',
       device: deviceToken
