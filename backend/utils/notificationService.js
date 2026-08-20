@@ -47,6 +47,29 @@ const parseFirebaseServiceAccount = () => {
     }
   }
 
+  const base64Json = String(
+    process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || ''
+  ).trim();
+  if (base64Json) {
+    try {
+      const parsed = JSON.parse(
+        Buffer.from(base64Json, 'base64').toString('utf8')
+      );
+      if (parsed && parsed.project_id && parsed.client_email && parsed.private_key) {
+        return {
+          projectId: String(parsed.project_id).trim(),
+          clientEmail: String(parsed.client_email).trim(),
+          privateKey: String(parsed.private_key).replace(/\\n/g, '\n')
+        };
+      }
+    } catch (error) {
+      console.error(
+        'Failed to parse FIREBASE_SERVICE_ACCOUNT_BASE64:',
+        error.message
+      );
+    }
+  }
+
   const projectId = String(process.env.FIREBASE_PROJECT_ID || '').trim();
   const clientEmail = String(process.env.FIREBASE_CLIENT_EMAIL || '').trim();
   const privateKey = String(process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n').trim();
